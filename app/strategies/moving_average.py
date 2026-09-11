@@ -123,41 +123,83 @@ class MovingAverageCrossoverStrategy(BaseStrategy):
 
         if bullish_cross and (direction in ["LONG_ONLY", "BOTH"]):
             if not has_open_position or position_side != "LONG":
+                sl = round(price * (1 - sl_pct), 2) if sl_pct > 0 else None
+                tp = round(price * (1 + tp_pct), 2) if tp_pct > 0 else None
+                spread = round(fast_curr - slow_curr, 2)
+                spread_pct = round((spread / slow_curr) * 100, 3)
                 signals.append(Signal(
-                    action=SignalAction.BUY,
+                    action=SignalAction.BUY_TO_OPEN,
                     symbol=symbol,
                     timestamp=timestamp,
                     price=price,
-                    stop_loss=round(price * (1 - sl_pct), 2) if sl_pct > 0 else None,
-                    target=round(price * (1 + tp_pct), 2) if tp_pct > 0 else None,
+                    stop_loss=sl,
+                    target=tp,
                     confidence=1.0,
-                    reason=f"Bullish crossover: Fast MA ({fast_curr:.2f}) crossed above Slow MA ({slow_curr:.2f})",
-                    metadata={"fast_ma": round(fast_curr, 2), "slow_ma": round(slow_curr, 2)}
+                    reason=f"Bullish crossover: Fast MA ({fast_curr:.2f}) crossed above Slow MA ({slow_curr:.2f}) [spread: +₹{spread:.2f} (+{spread_pct}%)]",
+                    metadata={
+                        "trigger": "BULLISH_CROSSOVER",
+                        "intent": "BUY_TO_OPEN",
+                        "fast_ma": round(fast_curr, 2),
+                        "slow_ma": round(slow_curr, 2),
+                        "ma_spread": spread,
+                        "spread_pct": spread_pct,
+                        "trend": "UPTREND",
+                        "candle_close": price,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "strategy": self.name
+                    }
                 ))
 
         elif bearish_cross:
+            spread = round(fast_curr - slow_curr, 2)
+            spread_pct = round((spread / slow_curr) * 100, 3)
             if has_open_position and position_side == "LONG":
                 # Exit long position
                 signals.append(Signal(
-                    action=SignalAction.EXIT,
+                    action=SignalAction.SELL_TO_CLOSE,
                     symbol=symbol,
                     timestamp=timestamp,
                     price=price,
                     confidence=1.0,
-                    reason=f"Bearish crossover: Fast MA ({fast_curr:.2f}) crossed below Slow MA ({slow_curr:.2f})",
-                    metadata={"fast_ma": round(fast_curr, 2), "slow_ma": round(slow_curr, 2)}
+                    reason=f"Bearish crossover: Fast MA ({fast_curr:.2f}) crossed below Slow MA ({slow_curr:.2f}) [spread: {spread:.2f} ({spread_pct}%)]",
+                    metadata={
+                        "trigger": "BEARISH_CROSSOVER_EXIT",
+                        "intent": "SELL_TO_CLOSE",
+                        "fast_ma": round(fast_curr, 2),
+                        "slow_ma": round(slow_curr, 2),
+                        "ma_spread": spread,
+                        "spread_pct": spread_pct,
+                        "trend": "DOWNTREND",
+                        "candle_close": price,
+                        "strategy": self.name
+                    }
                 ))
             elif direction in ["SHORT_ONLY", "BOTH"]:
+                sl = round(price * (1 + sl_pct), 2) if sl_pct > 0 else None
+                tp = round(price * (1 - tp_pct), 2) if tp_pct > 0 else None
                 signals.append(Signal(
-                    action=SignalAction.SELL,
+                    action=SignalAction.SELL_TO_OPEN,
                     symbol=symbol,
                     timestamp=timestamp,
                     price=price,
-                    stop_loss=round(price * (1 + sl_pct), 2) if sl_pct > 0 else None,
-                    target=round(price * (1 - tp_pct), 2) if tp_pct > 0 else None,
+                    stop_loss=sl,
+                    target=tp,
                     confidence=1.0,
-                    reason=f"Bearish short signal: Fast MA ({fast_curr:.2f}) crossed below Slow MA ({slow_curr:.2f})",
-                    metadata={"fast_ma": round(fast_curr, 2), "slow_ma": round(slow_curr, 2)}
+                    reason=f"Bearish short signal: Fast MA ({fast_curr:.2f}) crossed below Slow MA ({slow_curr:.2f}) [spread: {spread:.2f} ({spread_pct}%)]",
+                    metadata={
+                        "trigger": "BEARISH_CROSSOVER_SHORT",
+                        "intent": "SELL_TO_OPEN",
+                        "fast_ma": round(fast_curr, 2),
+                        "slow_ma": round(slow_curr, 2),
+                        "ma_spread": spread,
+                        "spread_pct": spread_pct,
+                        "trend": "DOWNTREND",
+                        "candle_close": price,
+                        "stop_loss": sl,
+                        "take_profit": tp,
+                        "strategy": self.name
+                    }
                 ))
 
         return signals

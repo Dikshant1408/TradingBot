@@ -4,6 +4,7 @@ Application Settings and Configuration Management.
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal, Optional
+from datetime import datetime, timezone, timedelta
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -101,33 +102,81 @@ class Settings(BaseSettings):
         return data
 
 
+class LiveTradingSession:
+    def __init__(self, token: str, authorized_at: datetime, expires_at: datetime, authorized_by: str):
+        self.token = token
+        self.authorized_at = authorized_at
+        self.expires_at = expires_at
+        self.authorized_by = authorized_by
+
+    @property
+    def is_expired(self) -> bool:
+        from datetime import datetime, timezone
+        return datetime.now(timezone.utc) >= self.expires_at
+
+    @property
+    def remaining_seconds(self) -> int:
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if now >= self.expires_at:
+            return 0
+        return int((self.expires_at - now).total_seconds())
+
+
 class ProcessSecurityContext:
     """
     Ephemeral in-memory authorization store for live trading.
     STRICT SAFETY RULE: Never saved to disk or DB.
-    Whenever the process reboots, live authorization is instantly revoked.
+    Whenever the process reboots, live authorization is instantly wiped out.
+    Enforces a strict sliding 15-minute time-to-live (TTL) session token.
     """
-    def __init__(self):
-        self.session_authorized: bool = False
-        self.authorized_at_utc: Optional[str] = None
-        self.authorized_by: Optional[str] = None
+    def __init__(self, session_ttl_minutes: int = 15):
+        self._session: Optional[LiveTradingSession] = None
+        self.session_ttl_minutes = session_ttl_minutes
 
-    def authorize_session(self, user_confirmation: str) -> bool:
-        from datetime import datetime, timezone
+    def authorize_session(self, user_confirmation: str, ttl_minutes: Optional[int] = None) -> Optional[LiveTradingSession]:
+        from datetime import datetime, timezone, timedelta
+        import uuid
         if user_confirmation == "I CONFIRM LIVE TRADING AT MY OWN RISK":
-            self.session_authorized = True
-            self.authorized_at_utc = datetime.now(timezone.utc).isoformat()
-            self.authorized_by = "LOCAL_USER_MANUAL_OVERRIDE"
-            return True
-        return False
+            now = datetime.now(timezone.utc)
+            ttl = ttl_minutes or self.session_ttl_minutes
+            expires = now + timedelta(minutes=ttl)
+            token = f"live_sess_{uuid.uuid4().hex[:16]}"
+            self._session = LiveTradingSession(
+                token=token,
+                authorized_at=now,
+                expires_at=expires,
+                authorized_by="LOCAL_USER_MANUAL_OVERRIDE"
+            )
+            return self._session
+        return None
 
     def revoke_session(self) -> None:
-        self.session_authorized = False
-        self.authorized_at_utc = None
-        self.authorized_by = None
+        self._session = None
 
-    def is_authorized(self) -> bool:
-        return self.session_authorized
+    def is_authorized(self, token: Optional[str] = None) -> bool:
+        if self._session is None:
+            return False
+        if self._session.is_expired:
+            self._session = None
+            return False
+        if token is not None and self._session.token != token:
+            return False
+        return True
+
+    def get_session_info(self) -> Optional[dict]:
+        if self._session is None:
+            return None
+        if self._session.is_expired:
+            self._session = None
+            return None
+        return {
+            "token": self._session.token,
+            "authorized_at": self._session.authorized_at.isoformat(),
+            "expires_at": self._session.expires_at.isoformat(),
+            "remaining_seconds": self._session.remaining_seconds,
+            "authorized_by": self._session.authorized_by
+        }
 
 
 process_security_context = ProcessSecurityContext()

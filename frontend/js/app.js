@@ -23,6 +23,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if (target === 'data') loadMarketDataTab();
       if (target === 'settings') loadSettingsAndLogs();
       if (target === 'strategies') loadStrategiesTab();
+      if (target === 'research') loadExperiments();
     });
   });
 
@@ -190,6 +191,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const execModelEl = document.getElementById('bt-exec-model');
       const segmentEl = document.getElementById('bt-segment');
 
+      const brokerProfileEl = document.getElementById('bt-broker-profile');
+
       const payload = {
         strategy_id: document.getElementById('bt-strategy').value,
         symbol: document.getElementById('bt-instrument').value,
@@ -199,6 +202,7 @@ document.addEventListener('DOMContentLoaded', () => {
         slippage_pct: parseFloat(document.getElementById('bt-slippage').value) / 100,
         execution_model: execModelEl ? execModelEl.value : 'NEXT_OPEN',
         segment: segmentEl ? segmentEl.value : 'EQUITY_INTRADAY',
+        broker_profile: brokerProfileEl ? brokerProfileEl.value : 'ZERODHA',
         parameters: {
           fast_period: parseInt(document.getElementById('bt-fast-ma').value),
           slow_period: parseInt(document.getElementById('bt-slow-ma').value),
@@ -311,6 +315,29 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('kpi-sharpe').textContent = m.sharpe_ratio;
     document.getElementById('kpi-fees').textContent = `₹${m.total_fees.toLocaleString('en-IN')}`;
     document.getElementById('kpi-slippage').textContent = `₹${m.slippage_cost.toLocaleString('en-IN')}`;
+    const brokerProfileLabel = document.getElementById('kpi-broker-profile');
+    if (brokerProfileLabel) {
+      const profileEl = document.getElementById('bt-broker-profile');
+      brokerProfileLabel.textContent = profileEl ? profileEl.options[profileEl.selectedIndex].text : '';
+    }
+
+    // 2b. Quality Score Subscores
+    const qbdEl = document.getElementById('bt-quality-breakdown');
+    if (qbdEl && res.diagnostics && res.diagnostics.subscores) {
+      qbdEl.style.display = 'grid';
+      const ss = res.diagnostics.subscores;
+      const setSubscore = (id, val) => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.textContent = val !== undefined ? `${val}/100` : '--';
+          el.className = 'quality-subscore-val' + (val >= 80 ? ' positive' : val >= 50 ? ' neutral' : ' negative');
+        }
+      };
+      setSubscore('qbd-sample', ss.sample_size);
+      setSubscore('qbd-exec', ss.execution_realism);
+      setSubscore('qbd-cost', ss.cost_impact);
+      setSubscore('qbd-dd', ss.drawdown_resilience);
+    }
 
     // 3. Plotly Candlestick & Equity Curves
     ChartEngine.renderPlotlyJson('bt-candlestick-chart', res.candlestick_chart);
@@ -429,6 +456,33 @@ document.addEventListener('DOMContentLoaded', () => {
     if (exportBtn) {
       exportBtn.onclick = () => {
         window.open(`/api/backtest/${res.id}/export-csv`, '_blank');
+      };
+    }
+
+    // Wire Save Experiment button
+    const saveExpBtn = document.getElementById('btn-save-experiment');
+    if (saveExpBtn) {
+      saveExpBtn.onclick = async () => {
+        const name = prompt('Experiment name (e.g. "MA20/50 NIFTY 2023"):', `${res.metrics?.strategy_name || 'Strategy'} @ ${new Date().toLocaleDateString('en-IN')}`);
+        if (!name) return;
+        const tags = prompt('Tags (comma-separated, optional):', '') || '';
+        const hypothesis = prompt('Hypothesis (optional, 1 sentence):', '') || '';
+        try {
+          const payload = {
+            name,
+            backtest_id: res.id,
+            symbol: document.getElementById('bt-instrument').value,
+            strategy_id: document.getElementById('bt-strategy').value,
+            hypothesis,
+            tags: tags.split(',').map(t => t.trim()).filter(Boolean),
+            metrics: res.metrics,
+            parameters: res.parameters
+          };
+          await API.saveExperiment(payload);
+          alert(`Experiment "${name}" saved! View it in the Research tab.`);
+        } catch (err) {
+          alert('Failed to save: ' + err.message);
+        }
       };
     }
   }
@@ -1000,5 +1054,45 @@ document.addEventListener('DOMContentLoaded', () => {
         container.appendChild(div);
       });
     } catch (e) {}
+  }
+
+  // --- Research & Experiments Tab ---
+  async function loadExperiments() {
+    const tbody = document.getElementById('experiments-table-body');
+    if (!tbody) return;
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#57606a;">Loading...</td></tr>';
+    try {
+      const list = await API.getExperiments();
+      if (!list || list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:#57606a;">No experiments saved yet. Run a backtest and click "Save as Experiment".</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      list.forEach(exp => {
+        const m = exp.metrics || {};
+        const pnlCls = (m.return_pct || 0) >= 0 ? 'positive' : 'negative';
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td style="font-weight:700; color:#58a6ff;">${exp.name || '-'}</td>
+          <td>${exp.symbol || '-'}</td>
+          <td>${exp.strategy_id || '-'}</td>
+          <td class="${pnlCls}">${m.return_pct !== undefined ? (m.return_pct >= 0 ? '+' : '') + m.return_pct + '%' : '-'}</td>
+          <td>${m.sharpe_ratio !== undefined ? m.sharpe_ratio : '-'}</td>
+          <td>${m.win_rate !== undefined ? m.win_rate + '%' : '-'}</td>
+          <td>${m.max_drawdown !== undefined ? m.max_drawdown + '%' : '-'}</td>
+          <td>${m.total_trades !== undefined ? m.total_trades : '-'}</td>
+          <td style="color:#8b949e; font-size:11px;">${(exp.tags || []).join(', ')}</td>
+          <td style="color:#8b949e;">${exp.created_at ? new Date(exp.created_at).toLocaleDateString('en-IN') : '-'}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    } catch (e) {
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center; color:var(--color-red);">Failed to load experiments.</td></tr>';
+    }
+  }
+
+  const btnRefreshExperiments = document.getElementById('btn-refresh-experiments');
+  if (btnRefreshExperiments) {
+    btnRefreshExperiments.addEventListener('click', loadExperiments);
   }
 });

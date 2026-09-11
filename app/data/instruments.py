@@ -18,6 +18,7 @@ class Instrument(BaseModel):
     option_type: Optional[Literal["CE", "PE"]] = None
     trading_hours: str = "09:15-15:30"
     is_active: bool = True
+    is_demo: bool = False
 
     def validate_quantity(self, quantity: int) -> bool:
         """Validate if quantity is positive and a multiple of lot size."""
@@ -32,7 +33,26 @@ class Instrument(BaseModel):
 
 # Pre-populated catalog of major Indian instruments
 DEFAULT_INSTRUMENTS: Dict[str, Instrument] = {
-    # Major Indices
+    # Explicit Demo Instruments (Zero Live Money Risk, Synthetic Feeds)
+    "NIFTY50_DEMO": Instrument(
+        symbol="NIFTY50_DEMO",
+        name="NIFTY 50 [DEMO SYNTHETIC]",
+        exchange="NSE",
+        instrument_type="INDEX",
+        lot_size=25,
+        tick_size=0.05,
+        is_demo=True
+    ),
+    "RELIANCE_DEMO": Instrument(
+        symbol="RELIANCE_DEMO",
+        name="Reliance Industries [DEMO SYNTHETIC]",
+        exchange="NSE",
+        instrument_type="EQUITY",
+        lot_size=1,
+        tick_size=0.05,
+        is_demo=True
+    ),
+    # Major Real Indices (Live Feeds)
     "NIFTY50": Instrument(
         symbol="NIFTY50",
         name="NIFTY 50 Index",
@@ -127,6 +147,12 @@ class InstrumentRegistry:
 
     def list_all(self) -> List[Instrument]:
         return list(self._instruments.values())
+
+    def list_demo(self) -> List[Instrument]:
+        return [inst for inst in self._instruments.values() if inst.is_demo]
+
+    def list_real(self) -> List[Instrument]:
+        return [inst for inst in self._instruments.values() if not inst.is_demo]
 
     def register(self, instrument: Instrument) -> None:
         self._instruments[instrument.symbol.upper()] = instrument

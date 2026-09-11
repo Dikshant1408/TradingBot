@@ -22,6 +22,17 @@ class OrderStatus(str, Enum):
     UNKNOWN = "UNKNOWN"  # Safety critical state: requires immediate reconciliation!
 
 
+class OrderIntent(str, Enum):
+    """
+    Explicit order intent to prevent semantic confusion between SELL and EXIT.
+    Prevents unintentional short sales or accidental flat position closures.
+    """
+    BUY_TO_OPEN = "BUY_TO_OPEN"       # Open or augment a LONG position
+    SELL_TO_CLOSE = "SELL_TO_CLOSE"   # Liquidate or reduce a LONG position
+    SELL_TO_OPEN = "SELL_TO_OPEN"     # Initiate or augment a SHORT position
+    BUY_TO_CLOSE = "BUY_TO_CLOSE"     # Cover or reduce a SHORT position
+
+
 # Valid state transitions
 VALID_TRANSITIONS: Dict[OrderStatus, Set[OrderStatus]] = {
     OrderStatus.CREATED: {OrderStatus.SUBMITTED, OrderStatus.REJECTED, OrderStatus.CANCELLED},

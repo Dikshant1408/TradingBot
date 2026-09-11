@@ -24,12 +24,14 @@ class PaperBroker(BaseBroker):
     def __init__(
         self,
         initial_capital: float = 100000.0,
-        cost_calculator: Optional[IndianCostCalculator] = None
+        cost_calculator: Optional[IndianCostCalculator] = None,
+        allow_shorting: bool = False
     ):
         self._is_live = False
         self.initial_capital = initial_capital
         self.cash = initial_capital
         self.cost_calculator = cost_calculator or IndianCostCalculator()
+        self.allow_shorting = allow_shorting
 
         self.positions: Dict[str, Dict[str, Any]] = {}
         self.orders: List[Dict[str, Any]] = []
@@ -42,19 +44,28 @@ class PaperBroker(BaseBroker):
         return False
 
     def get_account(self) -> Dict[str, Any]:
-        invested = sum(pos["current_price"] * pos["quantity"] for pos in self.positions.values())
+        long_invested = sum(
+            pos["current_price"] * pos["quantity"]
+            for pos in self.positions.values() if pos.get("side", "LONG") == "LONG"
+        )
+        short_collateral = sum(
+            pos.get("collateral_held", pos["entry_price"] * pos["quantity"]) +
+            ((pos["entry_price"] - pos["current_price"]) * pos["quantity"])
+            for pos in self.positions.values() if pos.get("side") == "SHORT"
+        )
         unrealized = sum(pos.get("unrealized_pnl", 0.0) for pos in self.positions.values())
-        total_equity = self.cash + invested
+        total_equity = self.cash + long_invested + short_collateral
         return {
             "mode": "PAPER",
             "cash": round(self.cash, 2),
-            "invested_value": round(invested, 2),
+            "invested_value": round(long_invested + short_collateral, 2),
             "total_equity": round(total_equity, 2),
             "unrealized_pnl": round(unrealized, 2),
             "realized_pnl": round(self.realized_pnl, 2),
             "today_pnl": round(self.today_pnl + unrealized, 2),
             "open_positions_count": len(self.positions),
-            "total_orders_count": len(self.orders)
+            "total_orders_count": len(self.orders),
+            "allow_shorting": self.allow_shorting
         }
 
     def get_positions(self) -> List[Dict[str, Any]]:
@@ -138,13 +149,17 @@ class PaperBroker(BaseBroker):
         pos = self.positions.get(symbol)
 
         if side.upper() == "BUY":
-            # If closing a short
+            # If closing an existing SHORT position
             if pos and pos["side"] == "SHORT":
                 close_qty = min(pos["quantity"], quantity)
-                gross_pnl = (pos["entry_price"] - fill_price) * close_qty
-                net_pnl = gross_pnl - costs.total_costs - pos.get("entry_costs", 0)
+                entry_costs_for_close = round(pos.get("entry_costs", 0.0) * (close_qty / pos["quantity"]), 2)
+                proportional_collateral = round(pos.get("collateral_held", pos["entry_price"] * pos["quantity"]) * (close_qty / pos["quantity"]), 2)
 
-                self.cash += (pos["entry_price"] * close_qty) + gross_pnl - costs.total_costs
+                costs = self.cost_calculator.calculate("BUY", fill_price, close_qty, timestamp=now)
+                gross_pnl = (pos["entry_price"] - fill_price) * close_qty
+                net_pnl = gross_pnl - costs.total_costs - entry_costs_for_close
+
+                self.cash += (proportional_collateral + gross_pnl - costs.total_costs)
                 self.realized_pnl += net_pnl
                 self.today_pnl += net_pnl
 
@@ -152,6 +167,7 @@ class PaperBroker(BaseBroker):
                     "trade_id": str(uuid.uuid4()),
                     "symbol": symbol,
                     "side": "SHORT",
+                    "action": "BUY_TO_CLOSE",
                     "quantity": close_qty,
                     "entry_time": pos["entry_time"],
                     "exit_time": now.isoformat(),
@@ -159,14 +175,25 @@ class PaperBroker(BaseBroker):
                     "exit_price": fill_price,
                     "gross_pnl": round(gross_pnl, 2),
                     "net_pnl": round(net_pnl, 2),
-                    "total_fees": round(costs.total_costs + pos.get("entry_costs", 0), 2),
+                    "total_fees": round(costs.total_costs + entry_costs_for_close, 2),
                     "slippage_cost": round(costs.slippage, 2),
                     "strategy_reason": reason,
                     "indicator_snapshot": indicator_snapshot or pos.get("indicator_snapshot", {}),
-                    "cost_regime": costs.cost_regime
+                    "cost_regime": costs.cost_regime,
+                    "is_partial": (close_qty < pos["quantity"])
                 }
                 self.trades.append(trade_record)
-                del self.positions[symbol]
+
+                # PARTIAL POSITION RETENTION
+                remaining_qty = pos["quantity"] - close_qty
+                if remaining_qty > 0:
+                    pos["quantity"] = remaining_qty
+                    pos["collateral_held"] = max(0.0, round(pos.get("collateral_held", 0.0) - proportional_collateral, 2))
+                    pos["entry_costs"] = max(0.0, round(pos.get("entry_costs", 0.0) - entry_costs_for_close, 2))
+                    pos["unrealized_pnl"] = round((pos["entry_price"] - pos["current_price"]) * remaining_qty, 2)
+                else:
+                    del self.positions[symbol]
+
                 event_bus.emit(EventType.ORDER_FILLED, trade_record)
                 return order_record
 
@@ -196,10 +223,14 @@ class PaperBroker(BaseBroker):
             # Closing Long
             if pos and pos["side"] == "LONG":
                 close_qty = min(pos["quantity"], quantity)
-                gross_pnl = (fill_price - pos["entry_price"]) * close_qty
-                net_pnl = gross_pnl - costs.total_costs - pos.get("entry_costs", 0)
+                entry_costs_for_close = round(pos.get("entry_costs", 0.0) * (close_qty / pos["quantity"]), 2)
+                gross_trade_value = fill_price * close_qty
 
-                self.cash += (trade_value - costs.total_costs)
+                costs = self.cost_calculator.calculate("SELL", fill_price, close_qty, timestamp=now)
+                gross_pnl = (fill_price - pos["entry_price"]) * close_qty
+                net_pnl = gross_pnl - costs.total_costs - entry_costs_for_close
+
+                self.cash += (gross_trade_value - costs.total_costs)
                 self.realized_pnl += net_pnl
                 self.today_pnl += net_pnl
 
@@ -207,6 +238,7 @@ class PaperBroker(BaseBroker):
                     "trade_id": str(uuid.uuid4()),
                     "symbol": symbol,
                     "side": "LONG",
+                    "action": "SELL_TO_CLOSE",
                     "quantity": close_qty,
                     "entry_time": pos["entry_time"],
                     "exit_time": now.isoformat(),
@@ -214,19 +246,47 @@ class PaperBroker(BaseBroker):
                     "exit_price": fill_price,
                     "gross_pnl": round(gross_pnl, 2),
                     "net_pnl": round(net_pnl, 2),
-                    "total_fees": round(costs.total_costs + pos.get("entry_costs", 0), 2),
+                    "total_fees": round(costs.total_costs + entry_costs_for_close, 2),
                     "slippage_cost": round(costs.slippage, 2),
                     "strategy_reason": reason,
                     "indicator_snapshot": indicator_snapshot or pos.get("indicator_snapshot", {}),
-                    "cost_regime": costs.cost_regime
+                    "cost_regime": costs.cost_regime,
+                    "is_partial": (close_qty < pos["quantity"])
                 }
                 self.trades.append(trade_record)
-                del self.positions[symbol]
+
+                # PARTIAL POSITION RETENTION
+                remaining_qty = pos["quantity"] - close_qty
+                if remaining_qty > 0:
+                    pos["quantity"] = remaining_qty
+                    pos["entry_costs"] = max(0.0, round(pos.get("entry_costs", 0.0) - entry_costs_for_close, 2))
+                    pos["unrealized_pnl"] = round((pos["current_price"] - pos["entry_price"]) * remaining_qty, 2)
+                else:
+                    del self.positions[symbol]
+
                 event_bus.emit(EventType.ORDER_FILLED, trade_record)
                 return order_record
 
-            # Opening Short
-            self.cash -= costs.total_costs
+            # Opening Short - Protected by allow_shorting flag
+            if not self.allow_shorting:
+                order_record["status"] = "REJECTED"
+                order_record["reason"] = (
+                    "Short selling rejected: allow_shorting is disabled. "
+                    "In Indian equity markets, overnight cash shorting is forbidden."
+                )
+                event_bus.emit(EventType.ORDER_REJECTED, order_record)
+                return order_record
+
+            collateral_needed = fill_price * quantity
+            total_required = collateral_needed + costs.total_costs
+
+            if self.cash < total_required:
+                order_record["status"] = "REJECTED"
+                order_record["reason"] = f"Insufficient funds for short collateral: required ₹{total_required:.2f}, available ₹{self.cash:.2f}"
+                event_bus.emit(EventType.ORDER_REJECTED, order_record)
+                return order_record
+
+            self.cash -= total_required
             self.positions[symbol] = {
                 "symbol": symbol,
                 "side": "SHORT",
@@ -236,6 +296,7 @@ class PaperBroker(BaseBroker):
                 "unrealized_pnl": 0.0,
                 "entry_time": now.isoformat(),
                 "entry_costs": costs.total_costs,
+                "collateral_held": collateral_needed,
                 "stop_loss": stop_loss,
                 "target": target
             }

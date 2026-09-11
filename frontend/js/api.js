@@ -107,6 +107,20 @@ const API = {
     }),
   getMonteCarlo: (runId) => fetch(`/api/backtest/${runId}/monte-carlo`).then(r => r.json()),
 
+  // Experiments
+  getExperiments: () => fetch('/api/backtest/experiments').then(r => r.json()),
+  saveExperiment: (payload) =>
+    fetch('/api/backtest/experiments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(async r => {
+      if (!r.ok) throw new Error((await r.json()).detail || 'Failed to save experiment');
+      return r.json();
+    }),
+  deleteExperiment: (id) =>
+    fetch(`/api/backtest/experiments/${id}`, { method: 'DELETE' }).then(r => r.json()),
+
   // Audit Trail
   getAuditTrail: (limit = 100) => fetch(`/api/system/audit-trail?limit=${limit}`).then(r => r.json())
 };

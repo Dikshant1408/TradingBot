@@ -58,10 +58,20 @@
     </div>
   </header>
 
+  <!-- Prominent Data Environment Banner (Demo vs Real Separation) -->
+  <div id="data-env-banner" class="data-env-banner banner-demo">
+    <div class="data-env-indicator">
+      <span class="pulse-dot"></span>
+      <span id="data-env-title">ENVIRONMENT: SYNTHETIC DEMO DATASET</span>
+    </div>
+    <div id="data-env-detail" class="data-env-detail">Active Feed: DEMO • Zero Live Money Risk • Pure Simulation Mode</div>
+  </div>
+
   <!-- Navigation Bar -->
   <nav class="nav-tabs">
     <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
     <button class="nav-tab" data-tab="backtest">Backtest</button>
+    <button class="nav-tab" data-tab="research">Research &amp; Experiments</button>
     <button class="nav-tab" data-tab="strategies">Strategies</button>
     <button class="nav-tab" data-tab="paper">Paper Trading</button>
     <button class="nav-tab" data-tab="portfolio">Portfolio</button>
@@ -281,6 +291,16 @@
                   </select>
                 </div>
               </div>
+              <div class="form-group">
+                <label class="form-label">Broker Tariff Profile</label>
+                <select id="bt-broker-profile" class="form-select">
+                  <option value="ZERODHA" selected>Zerodha (Free Delivery, ₹20 Intraday/F&amp;O)</option>
+                  <option value="ICICI_DIRECT">ICICI Direct Neo (₹20 Flat)</option>
+                  <option value="FLAT_DISCOUNT">Flat Discount Broker (₹20 Fixed)</option>
+                  <option value="PERCENTAGE">Percentage Brokerage (0.03%)</option>
+                  <option value="ZERO">Zero Brokerage (Statutory Taxes Only)</option>
+                </select>
+              </div>
               <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px;">
                 <button id="btn-run-backtest" type="submit" class="btn btn-primary">
                   RUN BACKTEST
@@ -363,13 +383,41 @@
                 <div class="card-subtext">Rf = 6.5% G-Sec</div>
               </div>
               <div class="card">
-                <div class="card-title">Statutory Taxes & Brokerage</div>
+                <div class="card-title">Est. Taxes &amp; Brokerage (Indicative)</div>
                 <div id="kpi-fees" class="card-value">₹0.00</div>
+                <div class="card-subtext" id="kpi-broker-profile"></div>
               </div>
               <div class="card">
                 <div class="card-title">Slippage Cost</div>
                 <div id="kpi-slippage" class="card-value">₹0.00</div>
               </div>
+            </div>
+
+            <!-- Quality Score Breakdown -->
+            <div id="bt-quality-breakdown" class="quality-breakdown-grid" style="display:none;">
+              <div class="quality-subscore-item">
+                <span class="quality-subscore-label">Sample Size</span>
+                <span id="qbd-sample" class="quality-subscore-val">--</span>
+              </div>
+              <div class="quality-subscore-item">
+                <span class="quality-subscore-label">Execution Realism</span>
+                <span id="qbd-exec" class="quality-subscore-val">--</span>
+              </div>
+              <div class="quality-subscore-item">
+                <span class="quality-subscore-label">Cost Impact</span>
+                <span id="qbd-cost" class="quality-subscore-val">--</span>
+              </div>
+              <div class="quality-subscore-item">
+                <span class="quality-subscore-label">Drawdown Risk</span>
+                <span id="qbd-dd" class="quality-subscore-val">--</span>
+              </div>
+            </div>
+
+            <!-- Save as Experiment button -->
+            <div style="text-align: right; margin-bottom: 12px;">
+              <button id="btn-save-experiment" class="btn" style="font-size: 11px; border: 1px solid var(--color-amber); color: var(--color-amber);" title="Save this run to Research Lab">
+                🔬 SAVE AS EXPERIMENT
+              </button>
             </div>
 
             <!-- Candlestick Chart -->
@@ -471,6 +519,67 @@
                 </table>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB: RESEARCH & EXPERIMENTS -->
+    <section id="pane-research" class="tab-pane">
+      <div class="split-view">
+        <div>
+          <div class="card">
+            <div class="card-title">🔬 Research Laboratory — Strategy Experiments</div>
+            <p style="color: #8b949e; margin-top: 6px; font-size: 12px;">
+              Save named backtest runs as Experiments. Track hypotheses, compare results, and build a 
+              scientific record before risking any real capital. Run a backtest first, then click
+              "Save as Experiment" on the Backtest tab.
+            </p>
+          </div>
+
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title">
+              <span>Saved Experiments</span>
+              <button id="btn-refresh-experiments" class="btn" style="font-size: 11px;">REFRESH</button>
+            </div>
+            <div class="table-container" style="margin-top: 8px; max-height: 350px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Symbol</th>
+                    <th>Strategy</th>
+                    <th>Return</th>
+                    <th>Sharpe</th>
+                    <th>WinRate</th>
+                    <th>MaxDD</th>
+                    <th>Trades</th>
+                    <th>Tags</th>
+                    <th>Date</th>
+                  </tr>
+                </thead>
+                <tbody id="experiments-table-body">
+                  <tr><td colspan="10" style="text-align:center; color: #57606a;">No experiments saved yet. Run a backtest and click "Save as Experiment".</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <!-- Side-by-side comparison -->
+          <div class="card">
+            <div class="card-title">📊 Quick Comparison (Select 2 Experiments)</div>
+            <div id="experiment-comparison-container" style="margin-top: 10px;">
+              <p style="color: #57606a; font-size: 12px;">Select experiments from the table to compare side-by-side.</p>
+            </div>
+          </div>
+
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title">Research Notes</div>
+            <textarea id="research-notes" class="form-input" 
+              style="width: 100%; height: 140px; resize: vertical; font-family: var(--font-mono); font-size: 12px;"
+              placeholder="Write hypotheses, observations, and conclusions here..."></textarea>
           </div>
         </div>
       </div>

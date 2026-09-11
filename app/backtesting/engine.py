@@ -34,20 +34,25 @@ class BacktestEngine:
         brokerage: float = 20.0,
         segment: str = "EQUITY_INTRADAY",
         slippage_pct: float = 0.0005,
-        execution_model: ExecutionModel = ExecutionModel.NEXT_OPEN
+        execution_model: ExecutionModel = ExecutionModel.NEXT_OPEN,
+        broker_profile: str = "ZERODHA",
+        allow_shorting: bool = False
     ):
         self.strategy = strategy
         self.initial_capital = initial_capital
         self.position_size_pct = position_size_pct
         self.execution_model = execution_model
+        self.allow_shorting = allow_shorting
         self.cost_calculator = IndianCostCalculator(
             brokerage_per_order=brokerage,
             segment=segment,
-            slippage_pct=slippage_pct
+            slippage_pct=slippage_pct,
+            broker_profile=broker_profile
         )
         self.broker = BacktestBrokerSimulator(
             initial_capital=initial_capital,
-            cost_calculator=self.cost_calculator
+            cost_calculator=self.cost_calculator,
+            allow_shorting=allow_shorting
         )
 
     def _execute_signal(
@@ -58,11 +63,12 @@ class BacktestEngine:
         timestamp: datetime,
         lot_size: int
     ) -> None:
-        """Helper to execute an order in the simulator."""
+        """Helper to execute an order with explicit intent in the simulator."""
         curr_price = fill_price
         candle_time = timestamp
 
-        if sig.action == SignalAction.BUY:
+        # Determine explicit order intent
+        if sig.action in [SignalAction.BUY_TO_OPEN, SignalAction.BUY]:
             allocated_capital = self.broker.cash * self.position_size_pct
             raw_qty = int(allocated_capital / curr_price) if curr_price > 0 else 0
             qty = (raw_qty // lot_size) * lot_size
@@ -73,24 +79,12 @@ class BacktestEngine:
                     quantity=qty,
                     price=curr_price,
                     timestamp=candle_time,
+                    intent="BUY_TO_OPEN",
                     reason=sig.reason,
                     indicator_snapshot=sig.metadata
                 )
 
-        elif sig.action == SignalAction.EXIT:
-            pos = self.broker.positions.get(symbol)
-            if pos:
-                self.broker.execute_order(
-                    symbol=symbol,
-                    side="EXIT",
-                    quantity=pos["quantity"],
-                    price=curr_price,
-                    timestamp=candle_time,
-                    reason=sig.reason,
-                    indicator_snapshot=sig.metadata
-                )
-
-        elif sig.action == SignalAction.SELL:
+        elif sig.action in [SignalAction.SELL_TO_CLOSE, SignalAction.EXIT]:
             pos = self.broker.positions.get(symbol)
             if pos and pos["side"] == "LONG":
                 self.broker.execute_order(
@@ -99,10 +93,40 @@ class BacktestEngine:
                     quantity=pos["quantity"],
                     price=curr_price,
                     timestamp=candle_time,
+                    intent="SELL_TO_CLOSE",
                     reason=sig.reason,
                     indicator_snapshot=sig.metadata
                 )
-            else:
+
+        elif sig.action == SignalAction.BUY_TO_CLOSE:
+            pos = self.broker.positions.get(symbol)
+            if pos and pos["side"] == "SHORT":
+                self.broker.execute_order(
+                    symbol=symbol,
+                    side="BUY",
+                    quantity=pos["quantity"],
+                    price=curr_price,
+                    timestamp=candle_time,
+                    intent="BUY_TO_CLOSE",
+                    reason=sig.reason,
+                    indicator_snapshot=sig.metadata
+                )
+
+        elif sig.action in [SignalAction.SELL_TO_OPEN, SignalAction.SELL]:
+            pos = self.broker.positions.get(symbol)
+            # If a long position exists, SELL functions as closing it
+            if pos and pos["side"] == "LONG":
+                self.broker.execute_order(
+                    symbol=symbol,
+                    side="SELL",
+                    quantity=pos["quantity"],
+                    price=curr_price,
+                    timestamp=candle_time,
+                    intent="SELL_TO_CLOSE",
+                    reason=sig.reason,
+                    indicator_snapshot=sig.metadata
+                )
+            elif self.allow_shorting:
                 allocated_capital = self.broker.cash * self.position_size_pct
                 raw_qty = int(allocated_capital / curr_price) if curr_price > 0 else 0
                 qty = (raw_qty // lot_size) * lot_size
@@ -113,6 +137,7 @@ class BacktestEngine:
                         quantity=qty,
                         price=curr_price,
                         timestamp=candle_time,
+                        intent="SELL_TO_OPEN",
                         reason=sig.reason,
                         indicator_snapshot=sig.metadata
                     )
@@ -205,7 +230,13 @@ class BacktestEngine:
         )
 
         # 7. Quality & Bias Diagnostics
-        diagnostics = BacktestDiagnostics.audit(metrics, self.broker.closed_trades, df)
+        diagnostics = BacktestDiagnostics.audit(
+            metrics=metrics,
+            trades=self.broker.closed_trades,
+            df=df,
+            execution_model=self.execution_model.value,
+            slippage_pct=self.cost_calculator.slippage_pct
+        )
 
         # 8. Monte Carlo Simulation (1,000 iterations)
         monte_carlo = MonteCarloSimulator.run_simulation(

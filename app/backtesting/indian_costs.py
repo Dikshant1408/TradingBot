@@ -16,6 +16,18 @@ class MarketSegment(str, Enum):
     OPTIONS = "OPTIONS"
 
 
+class BrokerProfile(str, Enum):
+    """
+    Explicit broker cost profiles with distinct tariff structures.
+    """
+    ZERODHA = "ZERODHA"                # Zerodha: Free delivery, min(₹20, 0.03%) intraday, ₹20 F&O
+    ICICI_DIRECT = "ICICI_DIRECT"      # ICICI Direct Neo: Free delivery, ₹20 flat intraday & F&O
+    FLAT_DISCOUNT = "FLAT_DISCOUNT"    # Generic discount broker: Flat ₹20 per executed order
+    PERCENTAGE = "PERCENTAGE"          # Pure percentage-based brokerage (e.g. 0.05%)
+    ZERO = "ZERO"                      # Zero brokerage (for isolating statutory taxes)
+    CUSTOM = "CUSTOM"                  # Custom user-defined limits
+
+
 class TradeCostBreakdown(BaseModel):
     brokerage: float = 0.0
     stt: float = 0.0
@@ -26,11 +38,14 @@ class TradeCostBreakdown(BaseModel):
     slippage: float = 0.0
     total_costs: float = 0.0
     cost_regime: str = "DEFAULT"
+    broker_profile: str = "ZERODHA"
+    is_indicative: bool = True  # Estimated indicative figures subject to broker round-off
 
 
 class IndianCostCalculator:
     """
-    Computes exact statutory transaction costs and taxes according to trade date and segment.
+    Computes estimated statutory transaction costs, taxes, and broker commissions.
+    Notice: All values are Estimated Statutory Taxes & Brokerage (Indicative).
     """
 
     OCT_2024_BUDGET_DATE = date(2024, 10, 1)
@@ -41,13 +56,17 @@ class IndianCostCalculator:
         segment: Literal["EQUITY_INTRADAY", "EQUITY_DELIVERY", "FUTURES", "OPTIONS"] = "EQUITY_INTRADAY",
         slippage_pct: float = 0.0005,
         gst_rate: float = 0.18,
-        sebi_rate: float = 0.000001
+        sebi_rate: float = 0.000001,
+        broker_profile: BrokerProfile = BrokerProfile.ZERODHA,
+        brokerage_pct: float = 0.0003
     ):
         self.brokerage_per_order = brokerage_per_order
         self.segment = segment
         self.slippage_pct = slippage_pct
         self.gst_rate = gst_rate
         self.sebi_rate = sebi_rate
+        self.broker_profile = broker_profile if isinstance(broker_profile, BrokerProfile) else BrokerProfile(str(broker_profile).upper())
+        self.brokerage_pct = brokerage_pct
 
     def get_stt_rate(self, side: str, trade_date: Optional[date] = None) -> float:
         """
@@ -102,6 +121,45 @@ class IndianCostCalculator:
             return 0.0003503  # NSE Options ~0.03503%
         return 0.0000297
 
+    def calculate_brokerage(self, turnover: float, segment: Optional[str] = None) -> float:
+        """
+        Calculate brokerage according to explicit broker profile tariff rules.
+        """
+        seg = segment or self.segment
+        profile = self.broker_profile
+
+        if profile == BrokerProfile.ZERODHA:
+            if seg == "EQUITY_DELIVERY":
+                return 0.0  # Free equity delivery
+            elif seg == "EQUITY_INTRADAY":
+                return min(self.brokerage_per_order, turnover * 0.0003)
+            elif seg in ["FUTURES", "OPTIONS"]:
+                return self.brokerage_per_order
+            return min(self.brokerage_per_order, turnover * 0.0003)
+
+        elif profile == BrokerProfile.ICICI_DIRECT:
+            if seg == "EQUITY_DELIVERY":
+                return 0.0
+            elif seg in ["EQUITY_INTRADAY", "FUTURES", "OPTIONS"]:
+                return min(self.brokerage_per_order, turnover * 0.0005)
+            return self.brokerage_per_order
+
+        elif profile == BrokerProfile.FLAT_DISCOUNT:
+            return self.brokerage_per_order
+
+        elif profile == BrokerProfile.PERCENTAGE:
+            return turnover * self.brokerage_pct
+
+        elif profile == BrokerProfile.ZERO:
+            return 0.0
+
+        elif profile == BrokerProfile.CUSTOM:
+            if self.brokerage_pct > 0:
+                return min(self.brokerage_per_order, turnover * self.brokerage_pct)
+            return self.brokerage_per_order
+
+        return min(self.brokerage_per_order, turnover * 0.0003)
+
     def calculate(
         self,
         side: str,
@@ -113,7 +171,7 @@ class IndianCostCalculator:
     ) -> TradeCostBreakdown:
         turnover = price * quantity
         if turnover <= 0:
-            return TradeCostBreakdown()
+            return TradeCostBreakdown(broker_profile=self.broker_profile.value)
 
         # Allow per-calculation segment override if provided
         active_segment = str(segment.value if isinstance(segment, MarketSegment) else (segment or self.segment))
@@ -134,8 +192,8 @@ class IndianCostCalculator:
 
         regime_label = "POST_OCT_2024" if (parsed_date and parsed_date >= self.OCT_2024_BUDGET_DATE) else "PRE_OCT_2024"
 
-        # 1. Brokerage
-        brokerage = min(self.brokerage_per_order, turnover * 0.0003)
+        # 1. Brokerage based on explicit broker tariff model
+        brokerage = self.calculate_brokerage(turnover, active_segment)
 
         # 2. STT
         stt_rate = self.get_stt_rate(side, parsed_date)
@@ -169,5 +227,7 @@ class IndianCostCalculator:
             stamp_duty=round(stamp_duty, 2),
             slippage=round(slippage, 2),
             total_costs=total,
-            cost_regime=cost_regime_str
+            cost_regime=cost_regime_str,
+            broker_profile=self.broker_profile.value,
+            is_indicative=True
         )

@@ -10,10 +10,16 @@ import pandas as pd
 
 
 class SignalAction(str, Enum):
+    # Standard Signal Actions
     BUY = "BUY"
     SELL = "SELL"
     EXIT = "EXIT"
     HOLD = "HOLD"
+    # Explicit Intent Signal Actions
+    BUY_TO_OPEN = "BUY_TO_OPEN"
+    SELL_TO_CLOSE = "SELL_TO_CLOSE"
+    SELL_TO_OPEN = "SELL_TO_OPEN"
+    BUY_TO_CLOSE = "BUY_TO_CLOSE"
 
 
 class Signal(BaseModel):

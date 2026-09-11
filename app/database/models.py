@@ -96,6 +96,27 @@ class BacktestRunModel(Base):
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
 
+class ExperimentModel(Base):
+    __tablename__ = "experiments"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(100), nullable=False)
+    hypothesis = Column(Text, nullable=True)
+    tags = Column(String(200), nullable=True)
+    run_id = Column(String(36), ForeignKey("backtests.id"), nullable=False)
+    strategy_name = Column(String(100), nullable=False)
+    symbol = Column(String(50), nullable=False)
+    quality_score = Column(Float, default=0.0)
+    return_pct = Column(Float, default=0.0)
+    net_pnl = Column(Float, default=0.0)
+    sharpe_ratio = Column(Float, default=0.0)
+    max_drawdown = Column(Float, default=0.0)
+    win_rate = Column(Float, default=0.0)
+    total_trades = Column(Integer, default=0)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+
+
 class OrderModel(Base):
     __tablename__ = "orders"
 
