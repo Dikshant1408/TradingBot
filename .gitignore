@@ -1,0 +1,43 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+env/
+venv/
+ENV/
+
+# Environment Variables & Secrets
+.env
+.env.local
+*.pem
+*.key
+
+# Database
+*.sqlite3
+*.db
+*.db-*
+*.db-shm
+*.db-wal
+
+# Logs
+logs/
+*.log
+
+# Test & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Data caches & temporary files
+data/cache/
+data/raw/*
+!data/raw/.gitkeep
+data/processed/*
+!data/processed/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db

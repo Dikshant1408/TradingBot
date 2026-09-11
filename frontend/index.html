@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuantDesk India - Quantitative Trading Workstation</title>
+  <link rel="stylesheet" href="/static/css/terminal.css">
+  <!-- Plotly.js for interactive quantitative charts -->
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+</head>
+<body>
+
+  <!-- Top Sticky Header Bar -->
+  <header class="top-header">
+    <div class="brand-section">
+      <div class="brand-title">
+        <span>⚡ QUANTDESK INDIA</span>
+        <span class="brand-badge">NSE/BSE TERMINAL</span>
+      </div>
+      <div id="mode-badge" class="mode-badge mode-paper">● PAPER TRADING</div>
+    </div>
+
+    <div class="header-telemetry">
+      <div class="telemetry-item">
+        <span class="telemetry-label">Session Clock</span>
+        <span id="telemetry-clock" class="telemetry-val">--:--:-- IST</span>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Market</span>
+        <span id="telemetry-market" class="telemetry-val">--</span>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Bot Status</span>
+        <span id="telemetry-status" class="telemetry-val">IDLE</span>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Virtual Cash</span>
+        <span id="telemetry-cash" class="telemetry-val">₹100,000.00</span>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Today's P&L</span>
+        <span id="telemetry-pnl" class="telemetry-val">₹0.00</span>
+      </div>
+
+      <div class="telemetry-item">
+        <span class="telemetry-label">Drawdown</span>
+        <span id="telemetry-drawdown" class="telemetry-val">0.00%</span>
+      </div>
+
+      <!-- Emergency Stop Button -->
+      <button id="btn-emergency-stop" class="btn-emergency-stop" title="Immediate strategy execution halt & order lock">
+        🛑 EMERGENCY STOP
+      </button>
+    </div>
+  </header>
+
+  <!-- Navigation Bar -->
+  <nav class="nav-tabs">
+    <button class="nav-tab active" data-tab="dashboard">Dashboard</button>
+    <button class="nav-tab" data-tab="backtest">Backtest</button>
+    <button class="nav-tab" data-tab="strategies">Strategies</button>
+    <button class="nav-tab" data-tab="paper">Paper Trading</button>
+    <button class="nav-tab" data-tab="portfolio">Portfolio</button>
+    <button class="nav-tab" data-tab="trades">Trades</button>
+    <button class="nav-tab" data-tab="risk">Risk Controls</button>
+    <button class="nav-tab" data-tab="data">Market Data</button>
+    <button class="nav-tab" data-tab="settings">Settings & Logs</button>
+  </nav>
+
+  <!-- Emergency Halt Alert Banner -->
+  <div id="emergency-banner" class="banner banner-danger" style="display: none; margin: 12px 16px 0 16px;">
+    <!-- Populated dynamically via JS -->
+  </div>
+
+  <main class="main-content">
+
+    <!-- TAB 1: DASHBOARD -->
+    <section id="pane-dashboard" class="tab-pane active">
+      <div class="grid-kpi">
+        <div class="card">
+          <div class="card-title">Virtual Cash</div>
+          <div id="dash-cash" class="card-value">₹100,000.00</div>
+          <div class="card-subtext">Unallocated balance</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Invested Amount</div>
+          <div id="dash-invested" class="card-value">₹0.00</div>
+          <div class="card-subtext">Active open margin</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Total Equity</div>
+          <div id="dash-equity" class="card-value">₹100,000.00</div>
+          <div class="card-subtext">Cash + Open positions</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Today's P&L</div>
+          <div id="dash-today-pnl" class="card-value">₹0.00</div>
+          <div class="card-subtext">Realized + Unrealized</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Max Drawdown</div>
+          <div id="dash-drawdown" class="card-value">0.00%</div>
+          <div class="card-subtext">Peak-to-trough</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Trades Today</div>
+          <div id="dash-trades-count" class="card-value">0 / 5</div>
+          <div class="card-subtext">Daily limit: 5 trades</div>
+        </div>
+      </div>
+
+      <div class="split-view">
+        <div>
+          <!-- Quick Bot Controls -->
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Quick Bot Controls</div>
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 10px;">
+              <div style="display: flex; gap: 8px;">
+                <button class="btn btn-success" style="flex: 1;" onclick="document.querySelector('[data-tab=\'paper\']').click()">Open Paper Replay</button>
+                <button class="btn btn-primary" style="flex: 1;" onclick="document.querySelector('[data-tab=\'backtest\']').click()">New Backtest</button>
+              </div>
+              <button class="btn btn-danger" onclick="document.getElementById('btn-emergency-stop').click()">Emergency Stop</button>
+            </div>
+          </div>
+
+          <!-- Risk Limits Gauge Summary -->
+          <div class="card">
+            <div class="card-title">Active Risk Guardrails</div>
+            <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 10px; font-size: 11px;">
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                  <span>Daily Loss Utilization</span>
+                  <span id="gauge-daily-loss">₹0 / ₹5,000 (0%)</span>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                  <span>Drawdown vs 5% Limit</span>
+                  <span id="gauge-drawdown">0% / 5% (0%)</span>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+                  <span>Trades Count vs 5/Day</span>
+                  <span id="gauge-trades">0 / 5 (0%)</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">
+              <span>Simulated Open Positions</span>
+              <span class="brand-badge">MARK TO MARKET</span>
+            </div>
+            <div class="table-container" style="margin-top: 8px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Entry Price</th>
+                    <th>LTP</th>
+                    <th>Unrealized P&L</th>
+                    <th>SL / Target</th>
+                  </tr>
+                </thead>
+                <tbody id="dash-positions-body">
+                  <tr><td colspan="7" style="text-align: center; color: #57606a;">No active open positions</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">System Execution Log (Last Events)</div>
+            <div class="table-container" style="margin-top: 8px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Fill Price</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody id="dash-orders-body">
+                  <tr><td colspan="7" style="text-align: center; color: #57606a;">No orders executed yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 2: BACKTEST -->
+    <section id="pane-backtest" class="tab-pane">
+      <div class="split-view">
+        <div>
+          <div class="card">
+            <div class="card-title">Configure Backtest</div>
+            <form id="backtest-form" style="margin-top: 10px;">
+              <div class="form-group">
+                <label class="form-label">Strategy</label>
+                <select id="bt-strategy" class="form-select"></select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Instrument (Indian Market)</label>
+                <select id="bt-instrument" class="form-select"></select>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div class="form-group">
+                  <label class="form-label">Fast MA Period</label>
+                  <input id="bt-fast-ma" type="number" class="form-input" value="20" min="2" max="200" required>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Slow MA Period</label>
+                  <input id="bt-slow-ma" type="number" class="form-input" value="50" min="5" max="500" required>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div class="form-group">
+                  <label class="form-label">MA Type</label>
+                  <select id="bt-ma-type" class="form-select">
+                    <option value="SMA">SMA (Simple)</option>
+                    <option value="EMA">EMA (Exponential)</option>
+                  </select>
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Direction</label>
+                  <select id="bt-direction" class="form-select">
+                    <option value="LONG_ONLY">Long Only</option>
+                    <option value="BOTH">Long & Short</option>
+                  </select>
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Starting Capital (₹ INR)</label>
+                <input id="bt-capital" type="number" class="form-input" value="100000" step="5000" required>
+              </div>
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div class="form-group">
+                  <label class="form-label">Position Size (%)</label>
+                  <input id="bt-pos-size" type="number" class="form-input" value="50" min="5" max="100">
+                </div>
+                <div class="form-group">
+                  <label class="form-label">Brokerage (₹/order)</label>
+                  <input id="bt-brokerage" type="number" class="form-input" value="20" min="0" step="5">
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Slippage (%)</label>
+                <input id="bt-slippage" type="number" class="form-input" value="0.05" step="0.01">
+              </div>
+              <button id="btn-run-backtest" type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">
+                RUN BACKTEST
+              </button>
+            </form>
+          </div>
+
+          <!-- Past Backtest Runs -->
+          <div class="card" style="margin-top: 16px;">
+            <div class="card-title">Recent Backtest Runs</div>
+            <div class="table-container" style="margin-top: 8px; max-height: 250px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Symbol</th>
+                    <th>Return</th>
+                    <th>WinRate</th>
+                    <th>MaxDD</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="bt-history-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <!-- Results Container -->
+          <div id="bt-results-container" style="display: none;">
+            <div class="grid-kpi">
+              <div class="card">
+                <div class="card-title">Initial Capital</div>
+                <div id="kpi-initial-cap" class="card-value">₹100,000</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Final Capital</div>
+                <div id="kpi-final-cap" class="card-value">₹100,000</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Net P&L</div>
+                <div id="kpi-net-pnl" class="card-value">₹0.00</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Win Rate</div>
+                <div id="kpi-win-rate" class="card-value">0%</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Profit Factor</div>
+                <div id="kpi-profit-factor" class="card-value">0.0</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Max Drawdown</div>
+                <div id="kpi-max-dd" class="card-value">0.0%</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Sharpe Ratio</div>
+                <div id="kpi-sharpe" class="card-value">0.0</div>
+                <div class="card-subtext">Rf = 6.5% G-Sec</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Statutory Taxes & Brokerage</div>
+                <div id="kpi-fees" class="card-value">₹0.00</div>
+              </div>
+              <div class="card">
+                <div class="card-title">Slippage Cost</div>
+                <div id="kpi-slippage" class="card-value">₹0.00</div>
+              </div>
+            </div>
+
+            <!-- Candlestick Chart -->
+            <div class="chart-box" id="bt-candlestick-chart"></div>
+
+            <!-- Equity & Drawdown Curves -->
+            <div class="chart-box" id="bt-equity-chart"></div>
+
+            <!-- Trades Table with CSV Export -->
+            <div class="card">
+              <div class="card-title">
+                <span>Executed Trade Log</span>
+                <button id="btn-export-bt-csv" class="btn" style="font-size: 11px;">EXPORT CSV</button>
+              </div>
+              <div class="table-container" style="margin-top: 8px; max-height: 300px;">
+                <table class="terminal-table">
+                  <thead>
+                    <tr>
+                      <th>#</th>
+                      <th>Entry Time</th>
+                      <th>Symbol</th>
+                      <th>Side</th>
+                      <th>Qty</th>
+                      <th>Entry Px</th>
+                      <th>Exit Px</th>
+                      <th>Net P&L</th>
+                      <th>Taxes/Fees</th>
+                      <th>Signal Reason</th>
+                    </tr>
+                  </thead>
+                  <tbody id="bt-trades-table-body"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: STRATEGIES -->
+    <section id="pane-strategies" class="tab-pane">
+      <div style="max-width: 900px; margin: 0 auto;">
+        <div class="card" style="margin-bottom: 16px;">
+          <div class="card-title">Quantitative Strategy Framework</div>
+          <p style="color: #8b949e; margin-top: 6px;">
+            Strategies inherit from <code>BaseStrategy</code> and implement chronological event-driven <code>on_bar()</code> analysis.
+            Zero lookahead bias is guaranteed: computations strictly evaluate historical bars up to the completed candle.
+          </p>
+        </div>
+        <div id="strategies-catalog-container"></div>
+      </div>
+    </section>
+
+    <!-- TAB 4: PAPER TRADING -->
+    <section id="pane-paper" class="tab-pane">
+      <div class="grid-kpi">
+        <div class="card">
+          <div class="card-title">Virtual Cash</div>
+          <div id="paper-cash-display" class="card-value">₹100,000.00</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Simulated Portfolio Equity</div>
+          <div id="paper-equity-display" class="card-value">₹100,000.00</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Session P&L</div>
+          <div id="paper-pnl-display" class="card-value">₹0.00</div>
+        </div>
+        <div class="card">
+          <div class="card-title">Replay Progression</div>
+          <div id="paper-progress-text" class="card-value">Bar 0 / 0</div>
+        </div>
+      </div>
+
+      <div class="split-view">
+        <div>
+          <div class="card">
+            <div class="card-title">Paper Session Controls</div>
+            <div class="form-group" style="margin-top: 10px;">
+              <label class="form-label">Strategy</label>
+              <select id="paper-strategy" class="form-select"></select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Instrument</label>
+              <select id="paper-instrument" class="form-select"></select>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div class="form-group">
+                <label class="form-label">Fast MA</label>
+                <input id="paper-fast-ma" type="number" class="form-input" value="10">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Slow MA</label>
+                <input id="paper-slow-ma" type="number" class="form-input" value="25">
+              </div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Virtual Capital (₹)</label>
+              <input id="paper-capital" type="number" class="form-input" value="100000">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Replay Interval (Seconds/Candle)</label>
+              <input id="paper-speed" type="number" class="form-input" value="0.5" step="0.1" min="0.1">
+            </div>
+            <button id="btn-paper-configure" class="btn" style="width: 100%; margin-bottom: 8px;">Configure Session</button>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 8px;">
+              <button id="btn-paper-start" class="btn btn-success">START</button>
+              <button id="btn-paper-pause" class="btn">PAUSE</button>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <button id="btn-paper-stop" class="btn">STOP</button>
+              <button id="btn-paper-step" class="btn btn-primary">STEP 1 BAR</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Open Paper Positions</div>
+            <div class="table-container" style="margin-top: 8px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Entry Px</th>
+                    <th>LTP</th>
+                    <th>Unrealized P&L</th>
+                    <th>SL / Target</th>
+                  </tr>
+                </thead>
+                <tbody id="paper-positions-body"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Simulated Order History</div>
+            <div class="table-container" style="margin-top: 8px; max-height: 280px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Symbol</th>
+                    <th>Side</th>
+                    <th>Qty</th>
+                    <th>Fill Price</th>
+                    <th>Status</th>
+                    <th>Reason</th>
+                  </tr>
+                </thead>
+                <tbody id="paper-orders-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 5: PORTFOLIO -->
+    <section id="pane-portfolio" class="tab-pane">
+      <div class="card">
+        <div class="card-title">Portfolio Asset Allocation & Positions</div>
+        <p style="color: #8b949e; font-size: 11px; margin-top: 4px;">
+          Synchronized view of cash balances, margin utilization, and position risk.
+        </p>
+      </div>
+    </section>
+
+    <!-- TAB 6: TRADES -->
+    <section id="pane-trades" class="tab-pane">
+      <div class="card">
+        <div class="card-title">Completed Trades Log</div>
+        <div class="table-container" style="margin-top: 10px;">
+          <table class="terminal-table">
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>Symbol</th>
+                <th>Side</th>
+                <th>Quantity</th>
+                <th>Entry Price</th>
+                <th>Exit Price</th>
+                <th>Net P&L</th>
+                <th>Taxes & Brokerage</th>
+                <th>Exit Timestamp</th>
+              </tr>
+            </thead>
+            <tbody id="all-trades-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 7: RISK CONTROLS -->
+    <section id="pane-risk" class="tab-pane">
+      <div class="split-view">
+        <div>
+          <div class="card">
+            <div class="card-title">Configure Risk Limits</div>
+            <form id="risk-limits-form" style="margin-top: 10px;">
+              <div class="form-group">
+                <label class="form-label">Maximum Daily Loss (₹ INR)</label>
+                <input id="risk-daily-loss" type="number" class="form-input" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Maximum Drawdown (%)</label>
+                <input id="risk-drawdown" type="number" class="form-input" step="0.5" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Maximum Trades Per Day</label>
+                <input id="risk-max-trades" type="number" class="form-input" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Max Position Size Value (₹ INR)</label>
+                <input id="risk-pos-size" type="number" class="form-input" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Max Concurrent Open Positions</label>
+                <input id="risk-open-pos" type="number" class="form-input" required>
+              </div>
+              <button type="submit" class="btn btn-primary" style="width: 100%; margin-top: 8px;">UPDATE RISK LIMITS</button>
+            </form>
+          </div>
+        </div>
+
+        <div>
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Emergency Hard Controls</div>
+            <div style="margin-top: 12px; display: flex; flex-direction: column; gap: 12px;">
+              <div>
+                <button id="btn-kill-switch-toggle" class="btn btn-danger" style="width: 100%;">
+                  TOGGLE KILL SWITCH
+                </button>
+                <div style="color: #8b949e; font-size: 11px; margin-top: 4px;">
+                  Persistent DB state. When active, all live order placements are strictly rejected.
+                </div>
+              </div>
+
+              <div style="border-top: 1px solid var(--border-color); padding-top: 12px;">
+                <button id="btn-emergency-stop-risk" class="btn btn-danger" style="width: 100%; font-weight: bold;">
+                  🛑 ACTIVATE EMERGENCY STOP
+                </button>
+                <button id="btn-emergency-reset" class="btn" style="width: 100%; margin-top: 8px;">
+                  MANUAL EMERGENCY STOP RESET
+                </button>
+                <div style="color: #8b949e; font-size: 11px; margin-top: 4px;">
+                  Emergency Stop halts all operations immediately and dispatches Telegram alert. Manual reset required to resume.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 8: MARKET DATA -->
+    <section id="pane-data" class="tab-pane">
+      <div class="split-view">
+        <div>
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Upload Custom CSV Data</div>
+            <form id="csv-upload-form" style="margin-top: 10px;">
+              <div class="form-group">
+                <label class="form-label">Symbol Name (e.g. RELIANCE)</label>
+                <input id="csv-symbol-input" type="text" class="form-input" value="CUSTOM_DATA" required>
+              </div>
+              <div class="form-group">
+                <label class="form-label">CSV File</label>
+                <input id="csv-file-input" type="file" accept=".csv" class="form-input" required>
+              </div>
+              <button type="submit" class="btn btn-primary" style="width: 100%;">UPLOAD & NORMALIZE</button>
+            </form>
+          </div>
+
+          <div class="card">
+            <div class="card-title">Generate Synthetic Demo Data</div>
+            <p style="color: #8b949e; font-size: 11px; margin-top: 6px; margin-bottom: 10px;">
+              Generates deterministic, authentic Indian price action series labeled clearly as <code>DEMO DATA</code>.
+            </p>
+            <button id="btn-generate-demo-data" class="btn" style="width: 100%;">GENERATE NIFTY50 DEMO</button>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title">Indian Market Instruments Catalog</div>
+            <div class="table-container" style="margin-top: 8px;">
+              <table class="terminal-table">
+                <thead>
+                  <tr>
+                    <th>Symbol</th>
+                    <th>Name</th>
+                    <th>Exchange</th>
+                    <th>Type</th>
+                    <th>Lot Size</th>
+                    <th>Tick Size</th>
+                    <th>Trading Hours</th>
+                  </tr>
+                </thead>
+                <tbody id="catalog-table-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 9: SETTINGS & LOGS -->
+    <section id="pane-settings" class="tab-pane">
+      <div class="split-view">
+        <div>
+          <div class="card" style="margin-bottom: 16px;">
+            <div class="card-title">Live Trading Pre-Flight Safety Gate</div>
+            <div id="preflight-status-box" style="margin-top: 10px; font-size: 12px;"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-title">System Settings (Sanitized)</div>
+            <pre id="settings-dump-box" style="margin-top: 10px; font-size: 11px; color: #8b949e; max-height: 250px; overflow-y: auto;"></pre>
+          </div>
+        </div>
+
+        <div>
+          <div class="card">
+            <div class="card-title">
+              <span>Application Rotating Log Stream</span>
+              <button id="btn-refresh-logs" class="btn" style="font-size: 11px;">REFRESH LOGS</button>
+            </div>
+            <div id="log-terminal-box" class="log-terminal" style="margin-top: 10px;"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/ws.js"></script>
+  <script src="/static/js/charts.js"></script>
+  <script src="/static/js/app.js"></script>
+</body>
+</html>
