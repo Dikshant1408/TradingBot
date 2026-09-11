@@ -189,6 +189,7 @@ class TradeModel(Base):
     return_pct = Column(Float, default=0.0)
     strategy_name = Column(String(100), default="MA_Crossover")
     strategy_reason = Column(Text, nullable=True)
+    indicator_snapshot_json = Column(Text, default="{}")  # Stored indicators for 'Why did the bot trade?'
     created_at = Column(DateTime(timezone=True), default=utc_now)
 
     __table_args__ = (
@@ -232,3 +233,19 @@ class SystemEventModel(Base):
     level = Column(String(20), default="INFO")
     component = Column(String(50), nullable=False)
     message = Column(Text, nullable=False)
+
+
+class AuditLogModel(Base):
+    __tablename__ = "audit_logs"
+
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    timestamp = Column(DateTime(timezone=True), default=utc_now)
+    actor = Column(String(50), default="SYSTEM", nullable=False)  # SYSTEM, USER, RISK_ENGINE
+    action = Column(String(100), nullable=False)  # CONFIG_CHANGE, KILL_SWITCH_TOGGLE, EMERGENCY_STOP, ORDER_REJECT, etc.
+    component = Column(String(50), nullable=False)
+    details_json = Column(Text, default="{}")
+
+    __table_args__ = (
+        Index("idx_audit_logs_timestamp", "timestamp"),
+        Index("idx_audit_logs_action", "action"),
+    )

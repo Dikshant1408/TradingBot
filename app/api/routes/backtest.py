@@ -14,6 +14,10 @@ from app.backtesting.engine import BacktestEngine
 from app.backtesting.reports import BacktestReportGenerator
 from app.config.settings import get_settings
 
+from app.backtesting.execution_models import ExecutionModel
+from app.backtesting.walk_forward import WalkForwardAnalyzer
+from app.backtesting.monte_carlo import MonteCarloSimulator
+
 router = APIRouter(prefix="/api/backtest", tags=["Backtest"])
 settings = get_settings()
 
@@ -24,8 +28,17 @@ class BacktestRequest(BaseModel):
     initial_capital: float = 100000.0
     position_size_pct: float = 0.50
     brokerage: float = 20.0
-    stt_rate: float = 0.00025
+    segment: str = "EQUITY_INTRADAY"
     slippage_pct: float = 0.0005
+    execution_model: str = "NEXT_OPEN"
+    parameters: Dict[str, Any] = Field(default_factory=dict)
+
+
+class WalkForwardRequest(BaseModel):
+    strategy_id: str = "MA_Crossover"
+    symbol: str = "NIFTY50_DEMO"
+    train_bars: int = 100
+    test_bars: int = 40
     parameters: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -41,7 +54,6 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
         if sample_path.exists():
             df, _ = DataLoader.load_csv(sample_path, req.symbol)
         else:
-            # Generate demo data automatically if needed
             sample_path = DataLoader.generate_demo_dataset(req.symbol)
             df, _ = DataLoader.load_csv(sample_path, req.symbol)
 
@@ -54,14 +66,21 @@ def run_backtest(req: BacktestRequest, db: Session = Depends(get_db)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Invalid strategy configuration: {str(e)}")
 
+    # Parse execution model
+    try:
+        exec_model = ExecutionModel(req.execution_model)
+    except ValueError:
+        exec_model = ExecutionModel.NEXT_OPEN
+
     # 3. Execute backtest
     engine = BacktestEngine(
         strategy=strategy,
         initial_capital=req.initial_capital,
         position_size_pct=req.position_size_pct,
         brokerage=req.brokerage,
-        stt_rate=req.stt_rate,
-        slippage_pct=req.slippage_pct
+        segment=req.segment,
+        slippage_pct=req.slippage_pct,
+        execution_model=exec_model
     )
 
     result = engine.run(df, symbol=req.symbol)
@@ -163,3 +182,50 @@ def export_backtest_trades_csv(run_id: str, db: Session = Depends(get_db)):
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=trades_{run.symbol}_{run_id[:8]}.csv"}
     )
+
+
+@router.post("/walk-forward")
+def run_walk_forward_analysis(req: WalkForwardRequest):
+    """
+    Run rolling window walk-forward validation (Train vs Test) on historical data.
+    """
+    df = DataLoader.get_processed(req.symbol)
+    if df is None:
+        sample_path = settings.DATA_DIR / "samples" / f"{req.symbol.upper()}.csv"
+        if sample_path.exists():
+            df, _ = DataLoader.load_csv(sample_path, req.symbol)
+        else:
+            sample_path = DataLoader.generate_demo_dataset(req.symbol)
+            df, _ = DataLoader.load_csv(sample_path, req.symbol)
+
+    strat_cls = strategy_registry.get(req.strategy_id)
+    if not strat_cls:
+        raise HTTPException(status_code=404, detail=f"Strategy {req.strategy_id} not found.")
+
+    res = WalkForwardAnalyzer.run_walk_forward(
+        df=df,
+        symbol=req.symbol,
+        strategy_class=strat_cls,
+        parameters=req.parameters,
+        train_bars=req.train_bars,
+        test_bars=req.test_bars
+    )
+    return res
+
+
+@router.post("/{run_id}/monte-carlo")
+def run_monte_carlo_for_run(run_id: str, simulations: int = 1000, db: Session = Depends(get_db)):
+    """
+    Re-run Monte Carlo bootstrap simulation on an existing backtest run's trade list.
+    """
+    run = db.query(BacktestRunModel).filter(BacktestRunModel.id == run_id).first()
+    if not run:
+        raise HTTPException(status_code=404, detail="Backtest run not found.")
+
+    trades = json.loads(run.trades_json)
+    mc = MonteCarloSimulator.run_simulation(
+        trades=trades,
+        initial_capital=run.initial_capital,
+        simulations=simulations
+    )
+    return mc

@@ -14,6 +14,9 @@ logger = logging.getLogger("trading_bot.brokers.live_stub")
 settings = get_settings()
 
 
+from app.config.settings import get_settings, process_security_context
+
+
 class LiveBrokerPreflightChecker:
     """
     Performs comprehensive pre-flight verification before live execution.
@@ -24,16 +27,18 @@ class LiveBrokerPreflightChecker:
         """
         Checklist for live trading readiness:
         1. Application mode is explicitly 'live'
-        2. Broker credentials populated in environment
-        3. Double confirmation accepted by user
-        4. Kill switch is deactivated
-        5. Emergency stop is inactive
-        6. Risk limits configured (> 0)
+        2. Independent hard flag LIVE_TRADING_ENABLED is True
+        3. Ephemeral process-lifetime session is authorized
+        4. Broker credentials populated in environment
+        5. Kill switch is deactivated
+        6. Emergency stop is inactive
+        7. Risk limits configured (> 0)
         """
         results = {
             "mode_is_live": settings.APP_MODE == "live",
+            "hard_flag_enabled": settings.LIVE_TRADING_ENABLED is True,
+            "process_session_authorized": process_security_context.is_authorized(),
             "credentials_present": bool(settings.BROKER_API_KEY and settings.BROKER_API_SECRET),
-            "double_confirmation_accepted": settings.LIVE_CONFIRMATION_ACCEPTED,
             "kill_switch_inactive": not state_manager.state.is_kill_switch_active,
             "emergency_stop_inactive": not state_manager.state.is_emergency_stopped,
             "risk_limits_configured": settings.MAX_DAILY_LOSS > 0 and settings.MAX_DRAWDOWN_PERCENT > 0,
@@ -42,8 +47,9 @@ class LiveBrokerPreflightChecker:
 
         results["all_passed"] = all([
             results["mode_is_live"],
+            results["hard_flag_enabled"],
+            results["process_session_authorized"],
             results["credentials_present"],
-            results["double_confirmation_accepted"],
             results["kill_switch_inactive"],
             results["emergency_stop_inactive"],
             results["risk_limits_configured"]

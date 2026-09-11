@@ -98,6 +98,59 @@ class MetricsCalculator:
         total_fees = round(sum(t.get("total_fees", 0) for t in trades), 2)
         total_slippage = round(sum(t.get("slippage_cost", 0) for t in trades), 2)
 
+        # 1. Long vs Short breakdown
+        long_trades = [t for t in trades if t.get("side") == "LONG"]
+        short_trades = [t for t in trades if t.get("side") == "SHORT"]
+
+        long_wins = [t for t in long_trades if t.get("net_pnl", 0) > 0]
+        short_wins = [t for t in short_trades if t.get("net_pnl", 0) > 0]
+
+        long_win_rate = round((len(long_wins) / len(long_trades)) * 100, 1) if long_trades else 0.0
+        short_win_rate = round((len(short_wins) / len(short_trades)) * 100, 1) if short_trades else 0.0
+        long_net_pnl = round(sum(t.get("net_pnl", 0) for t in long_trades), 2)
+        short_net_pnl = round(sum(t.get("net_pnl", 0) for t in short_trades), 2)
+
+        # 2. Day-of-Week Performance
+        day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
+        day_stats = {d: {"trades": 0, "wins": 0, "net_pnl": 0.0, "win_rate": 0.0} for d in day_names}
+
+        for t in trades:
+            try:
+                entry_dt = pd.to_datetime(t.get("entry_time"))
+                weekday_idx = entry_dt.weekday()
+                if 0 <= weekday_idx <= 4:
+                    d_name = day_names[weekday_idx]
+                    day_stats[d_name]["trades"] += 1
+                    pnl = t.get("net_pnl", 0.0)
+                    day_stats[d_name]["net_pnl"] = round(day_stats[d_name]["net_pnl"] + pnl, 2)
+                    if pnl > 0:
+                        day_stats[d_name]["wins"] += 1
+            except Exception:
+                pass
+
+        for d_name in day_names:
+            cnt = day_stats[d_name]["trades"]
+            if cnt > 0:
+                day_stats[d_name]["win_rate"] = round((day_stats[d_name]["wins"] / cnt) * 100, 1)
+
+        # 3. Monthly Return Matrix
+        monthly_matrix = {}
+        if not eq_df.empty:
+            try:
+                eq_df["year"] = eq_df["timestamp"].dt.year
+                eq_df["month"] = eq_df["timestamp"].dt.month
+
+                for (year, month), group in eq_df.groupby(["year", "month"]):
+                    year_str = str(year)
+                    if year_str not in monthly_matrix:
+                        monthly_matrix[year_str] = {}
+                    month_start_eq = group["equity"].iloc[0]
+                    month_end_eq = group["equity"].iloc[-1]
+                    m_ret = round(((month_end_eq - month_start_eq) / month_start_eq) * 100, 2) if month_start_eq > 0 else 0.0
+                    monthly_matrix[year_str][month] = m_ret
+            except Exception:
+                pass
+
         return {
             "initial_capital": round(initial_capital, 2),
             "final_capital": round(final_capital, 2),
@@ -119,5 +172,15 @@ class MetricsCalculator:
             "sharpe_ratio": sharpe_ratio,
             "sortino_ratio": sortino_ratio,
             "total_fees": total_fees,
-            "slippage_cost": total_slippage
+            "slippage_cost": total_slippage,
+            "long_short_breakdown": {
+                "long_trades": len(long_trades),
+                "long_win_rate": long_win_rate,
+                "long_net_pnl": long_net_pnl,
+                "short_trades": len(short_trades),
+                "short_win_rate": short_win_rate,
+                "short_net_pnl": short_net_pnl,
+            },
+            "day_of_week": day_stats,
+            "monthly_matrix": monthly_matrix
         }

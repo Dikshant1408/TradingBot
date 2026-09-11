@@ -10,7 +10,8 @@ from app.database.models import (
     TradeModel,
     PortfolioSnapshotModel,
     RiskEventModel,
-    SystemEventModel
+    SystemEventModel,
+    AuditLogModel
 )
 
 __all__ = [
@@ -30,4 +31,5 @@ __all__ = [
     "PortfolioSnapshotModel",
     "RiskEventModel",
     "SystemEventModel",
+    "AuditLogModel",
 ]

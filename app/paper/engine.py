@@ -165,7 +165,8 @@ class PaperTradingEngine:
                         price=curr_price,
                         stop_loss=sig.stop_loss,
                         target=sig.target,
-                        reason=sig.reason
+                        reason=sig.reason,
+                        indicator_snapshot=sig.metadata
                     )
                     executed_orders.append(order)
                     state_manager.update(

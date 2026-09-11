@@ -50,7 +50,8 @@ class BacktestBrokerSimulator:
         quantity: int,
         price: float,
         timestamp: datetime,
-        reason: str = ""
+        reason: str = "",
+        indicator_snapshot: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Simulate an order fill at bar execution price with slippage and Indian taxes.
@@ -65,11 +66,12 @@ class BacktestBrokerSimulator:
         else:
             fill_price = round(price * (1.0 - slippage_factor), 2)
 
-        # Statutory taxes and brokerage
+        # Statutory taxes and brokerage with date-awareness
         costs: TradeCostBreakdown = self.cost_calculator.calculate(
             side=side,
             price=fill_price,
-            quantity=quantity
+            quantity=quantity,
+            timestamp=timestamp
         )
 
         total_trade_value = fill_price * quantity
@@ -99,7 +101,9 @@ class BacktestBrokerSimulator:
                     "net_pnl": round(net_pnl, 2),
                     "total_fees": round(costs.total_costs + pos.get("entry_costs", 0), 2),
                     "slippage_cost": round(costs.slippage, 2),
-                    "strategy_reason": reason
+                    "strategy_reason": reason,
+                    "indicator_snapshot": indicator_snapshot or pos.get("indicator_snapshot", {}),
+                    "cost_regime": costs.cost_regime
                 }
                 self.closed_trades.append(trade_record)
                 del self.positions[symbol]
@@ -108,14 +112,13 @@ class BacktestBrokerSimulator:
             # Opening or adding to LONG position
             required_cash = total_trade_value + costs.total_costs
             if self.cash < required_cash:
-                # Can't afford full quantity, adjust if partial
                 max_qty = int(self.cash / (fill_price * (1 + 0.001)))
                 if max_qty <= 0:
                     logger.warning(f"Insufficient cash (₹{self.cash:.2f}) for order of {quantity} {symbol}")
                     return None
                 quantity = max_qty
                 total_trade_value = fill_price * quantity
-                costs = self.cost_calculator.calculate(side, fill_price, quantity)
+                costs = self.cost_calculator.calculate(side, fill_price, quantity, timestamp=timestamp)
 
             self.cash -= (total_trade_value + costs.total_costs)
             self.positions[symbol] = {
@@ -124,6 +127,7 @@ class BacktestBrokerSimulator:
                 "entry_price": fill_price,
                 "entry_time": timestamp,
                 "entry_costs": costs.total_costs,
+                "indicator_snapshot": indicator_snapshot or {},
                 "trade_id": trade_id
             }
             return {
@@ -155,7 +159,9 @@ class BacktestBrokerSimulator:
                     "net_pnl": round(net_pnl, 2),
                     "total_fees": round(costs.total_costs + pos.get("entry_costs", 0), 2),
                     "slippage_cost": round(costs.slippage, 2),
-                    "strategy_reason": reason
+                    "strategy_reason": reason,
+                    "indicator_snapshot": indicator_snapshot or pos.get("indicator_snapshot", {}),
+                    "cost_regime": costs.cost_regime
                 }
                 self.closed_trades.append(trade_record)
                 del self.positions[symbol]
@@ -169,6 +175,7 @@ class BacktestBrokerSimulator:
                 "entry_price": fill_price,
                 "entry_time": timestamp,
                 "entry_costs": costs.total_costs,
+                "indicator_snapshot": indicator_snapshot or {},
                 "trade_id": trade_id
             }
             return {

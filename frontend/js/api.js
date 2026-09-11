@@ -89,5 +89,24 @@ const API = {
     }).then(async r => {
       if (!r.ok) throw new Error((await r.json()).detail);
       return r.json();
-    })
+    }),
+  revokeLiveTrading: () => fetch('/api/live/revoke', { method: 'POST' }).then(r => r.json()),
+
+  // Walk-forward & Monte Carlo
+  runWalkForward: (payload) =>
+    fetch('/api/backtest/walk-forward', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    }).then(async r => {
+      if (!r.ok) {
+        const err = await r.json();
+        throw new Error(err.detail || 'Walk-forward failed');
+      }
+      return r.json();
+    }),
+  getMonteCarlo: (runId) => fetch(`/api/backtest/${runId}/monte-carlo`).then(r => r.json()),
+
+  // Audit Trail
+  getAuditTrail: (limit = 100) => fetch(`/api/system/audit-trail?limit=${limit}`).then(r => r.json())
 };

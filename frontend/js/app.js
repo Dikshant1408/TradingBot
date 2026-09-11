@@ -187,6 +187,9 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.disabled = true;
       btn.textContent = 'RUNNING BACKTEST...';
 
+      const execModelEl = document.getElementById('bt-exec-model');
+      const segmentEl = document.getElementById('bt-segment');
+
       const payload = {
         strategy_id: document.getElementById('bt-strategy').value,
         symbol: document.getElementById('bt-instrument').value,
@@ -194,6 +197,8 @@ document.addEventListener('DOMContentLoaded', () => {
         position_size_pct: parseFloat(document.getElementById('bt-pos-size').value) / 100,
         brokerage: parseFloat(document.getElementById('bt-brokerage').value),
         slippage_pct: parseFloat(document.getElementById('bt-slippage').value) / 100,
+        execution_model: execModelEl ? execModelEl.value : 'NEXT_OPEN',
+        segment: segmentEl ? segmentEl.value : 'EQUITY_INTRADAY',
         parameters: {
           fast_period: parseInt(document.getElementById('bt-fast-ma').value),
           slow_period: parseInt(document.getElementById('bt-slow-ma').value),
@@ -215,10 +220,84 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
+  // Walk-Forward Analysis Handler
+  const btnWalkForward = document.getElementById('btn-run-walk-forward');
+  if (btnWalkForward) {
+    btnWalkForward.addEventListener('click', async () => {
+      btnWalkForward.disabled = true;
+      btnWalkForward.textContent = 'ANALYZING...';
+      const execModelEl = document.getElementById('bt-exec-model');
+      const segmentEl = document.getElementById('bt-segment');
+
+      const payload = {
+        strategy_id: document.getElementById('bt-strategy').value,
+        symbol: document.getElementById('bt-instrument').value,
+        initial_capital: parseFloat(document.getElementById('bt-capital').value),
+        execution_model: execModelEl ? execModelEl.value : 'NEXT_OPEN',
+        segment: segmentEl ? segmentEl.value : 'EQUITY_INTRADAY',
+        parameters: {
+          fast_period: parseInt(document.getElementById('bt-fast-ma').value),
+          slow_period: parseInt(document.getElementById('bt-slow-ma').value),
+          ma_type: document.getElementById('bt-ma-type').value,
+          direction: document.getElementById('bt-direction').value
+        },
+        in_sample_pct: 0.65,
+        rolling_windows: 4
+      };
+
+      try {
+        const wfRes = await API.runWalkForward(payload);
+        renderWalkForwardModal(wfRes);
+      } catch (err) {
+        alert('Walk-Forward Analysis failed: ' + err.message);
+      } finally {
+        btnWalkForward.disabled = false;
+        btnWalkForward.textContent = 'WALK-FORWARD (OOS)';
+      }
+    });
+  }
+
+  window._currentBacktestTrades = [];
+
   function renderBacktestResults(res) {
     document.getElementById('bt-results-container').style.display = 'block';
     const m = res.metrics;
+    window._currentBacktestTrades = res.trades || [];
 
+    // 1. Anti-Bias Diagnostics
+    const diag = res.diagnostics;
+    if (diag) {
+      const scoreEl = document.getElementById('bt-robustness-score');
+      if (scoreEl) {
+        scoreEl.textContent = `${diag.robustness_score}/100`;
+        scoreEl.className = `diag-score ${diag.robustness_score >= 80 ? '' : diag.robustness_score >= 50 ? 'med' : 'low'}`;
+      }
+
+      const statusEl = document.getElementById('bt-diag-status');
+      if (statusEl) {
+        statusEl.innerHTML = diag.is_statistically_sound
+          ? '<span class="diag-badge diag-badge-clean">✓ ROBUST & STATISTICALLY SOUND</span>'
+          : '<span class="diag-badge diag-badge-warn">⚠️ BIAS / CURVE-FIT WARNINGS DETECTED</span>';
+      }
+
+      const badgesEl = document.getElementById('bt-diag-badges');
+      if (badgesEl) {
+        badgesEl.innerHTML = (diag.checks_passed || []).map(c => 
+          `<span class="diag-badge diag-badge-clean">✓ ${c.replace(/_/g, ' ')}</span>`
+        ).join(' ');
+      }
+
+      const warnEl = document.getElementById('bt-diag-warnings');
+      if (warnEl) {
+        if (diag.warnings && diag.warnings.length > 0) {
+          warnEl.innerHTML = diag.warnings.map(w => `<div style="margin-top: 4px;">⚠️ ${w}</div>`).join('');
+        } else {
+          warnEl.innerHTML = '<div style="color: var(--color-green); font-size: 11px;">All institutional robustness checks cleared (Zero lookahead, sufficient sample, non-fitted parameters).</div>';
+        }
+      }
+    }
+
+    // 2. High-Level Metrics
     document.getElementById('kpi-initial-cap').textContent = `₹${m.initial_capital.toLocaleString('en-IN')}`;
     document.getElementById('kpi-final-cap').textContent = `₹${m.final_capital.toLocaleString('en-IN')}`;
     
@@ -233,12 +312,98 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('kpi-fees').textContent = `₹${m.total_fees.toLocaleString('en-IN')}`;
     document.getElementById('kpi-slippage').textContent = `₹${m.slippage_cost.toLocaleString('en-IN')}`;
 
-    // Plotly Candlestick & Trade Markers
+    // 3. Plotly Candlestick & Equity Curves
     ChartEngine.renderPlotlyJson('bt-candlestick-chart', res.candlestick_chart);
-    // Plotly Equity Curve
     ChartEngine.renderPlotlyJson('bt-equity-chart', res.equity_chart);
 
-    // Trades Table
+    // 4. Monte Carlo Simulation
+    const mc = res.monte_carlo;
+    if (mc) {
+      const mcSummaryEl = document.getElementById('bt-monte-carlo-summary');
+      if (mcSummaryEl) mcSummaryEl.textContent = `${mc.simulations_count || 1000} paths generated`;
+
+      const medRetEl = document.getElementById('mc-median-ret');
+      if (medRetEl) medRetEl.textContent = `${mc.median_return_pct}%`;
+
+      const p5RetEl = document.getElementById('mc-p5-ret');
+      if (p5RetEl) p5RetEl.textContent = `${mc.p5_return_pct}%`;
+
+      const p95DdEl = document.getElementById('mc-p95-dd');
+      if (p95DdEl) p95DdEl.textContent = `${mc.p95_drawdown_pct}%`;
+
+      const ruinEl = document.getElementById('mc-ruin-risk');
+      if (ruinEl) ruinEl.textContent = `${mc.risk_of_ruin_pct}%`;
+
+      if (mc.plot_json) {
+        ChartEngine.renderPlotlyJson('bt-monte-carlo-chart', mc.plot_json);
+      }
+    }
+
+    // 5. Long vs Short Breakdown
+    const lsBody = document.getElementById('bt-long-short-body');
+    if (lsBody && m.long_short_stats) {
+      lsBody.innerHTML = '';
+      ['LONG', 'SHORT'].forEach(side => {
+        const s = m.long_short_stats[side];
+        if (!s) return;
+        const tr = document.createElement('tr');
+        const pnlCls = s.net_pnl >= 0 ? 'positive' : 'negative';
+        tr.innerHTML = `
+          <td><span class="badge ${side === 'LONG' ? 'positive' : 'negative'}">${side}</span></td>
+          <td>${s.trades_count}</td>
+          <td>${s.win_rate}%</td>
+          <td class="${pnlCls}">${s.net_pnl >= 0 ? '+' : ''}₹${s.net_pnl.toFixed(2)}</td>
+          <td>${s.profit_factor}</td>
+        `;
+        lsBody.appendChild(tr);
+      });
+    }
+
+    // 6. Day of Week Breakdown
+    const dowBody = document.getElementById('bt-dow-body');
+    if (dowBody && m.day_of_week_stats) {
+      dowBody.innerHTML = '';
+      Object.keys(m.day_of_week_stats).forEach(day => {
+        const d = m.day_of_week_stats[day];
+        const tr = document.createElement('tr');
+        const pnlCls = d.net_pnl >= 0 ? 'positive' : 'negative';
+        tr.innerHTML = `
+          <td style="font-weight: 600;">${day}</td>
+          <td>${d.trades_count}</td>
+          <td>${d.win_rate}%</td>
+          <td class="${pnlCls}">${d.net_pnl >= 0 ? '+' : ''}₹${d.net_pnl.toFixed(2)}</td>
+        `;
+        dowBody.appendChild(tr);
+      });
+    }
+
+    // 7. Monthly Performance Matrix
+    const monthBody = document.getElementById('bt-monthly-body');
+    if (monthBody && m.monthly_matrix) {
+      monthBody.innerHTML = '';
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      Object.keys(m.monthly_matrix).sort().reverse().forEach(yr => {
+        const yData = m.monthly_matrix[yr] || {};
+        const tr = document.createElement('tr');
+        let cellsHtml = `<td style="font-weight: 700; color: #fff;">${yr}</td>`;
+        months.forEach(mo => {
+          const val = yData[mo];
+          if (val === undefined || val === null) {
+            cellsHtml += `<td class="perf-cell-zero">-</td>`;
+          } else {
+            const cls = val > 0 ? 'perf-cell-pos' : val < 0 ? 'perf-cell-neg' : 'perf-cell-zero';
+            cellsHtml += `<td class="${cls}">${val > 0 ? '+' : ''}${val}%</td>`;
+          }
+        });
+        const ytd = yData['YTD'] || 0;
+        const ytdCls = ytd > 0 ? 'perf-cell-pos' : ytd < 0 ? 'perf-cell-neg' : 'perf-cell-zero';
+        cellsHtml += `<td class="${ytdCls}" style="font-weight: bold; border-left: 1px solid var(--border-color);">${ytd > 0 ? '+' : ''}${ytd}%</td>`;
+        tr.innerHTML = cellsHtml;
+        monthBody.appendChild(tr);
+      });
+    }
+
+    // 8. Trades Table with "Why?" Forensics Button
     const tbody = document.getElementById('bt-trades-table-body');
     tbody.innerHTML = '';
     res.trades.forEach((t, idx) => {
@@ -254,7 +419,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <td>₹${t.exit_price ? t.exit_price.toFixed(2) : '-'}</td>
         <td class="${pnlClass}">${t.net_pnl >= 0 ? '+' : ''}₹${t.net_pnl.toFixed(2)}</td>
         <td>₹${t.total_fees.toFixed(2)}</td>
-        <td style="color: #8b949e;">${t.strategy_reason || ''}</td>
+        <td style="color: #8b949e; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${t.strategy_reason || ''}</td>
+        <td><button class="btn" style="padding: 2px 8px; font-size: 10px; border-color: var(--color-blue); color: var(--color-blue);" onclick="window.inspectTrade(${idx})">Why?</button></td>
       `;
       tbody.appendChild(row);
     });
@@ -573,6 +739,8 @@ document.addEventListener('DOMContentLoaded', () => {
         preflightBox.innerHTML = `
           <div style="font-weight: bold; margin-bottom: 8px;">Mode: ${preflight.mode.toUpperCase()} | Locked: ${preflight.is_locked ? 'YES (SAFE)' : 'UNLOCKED'}</div>
           <div>✓ App Mode 'live': ${preflight.checklist.mode_is_live ? 'YES' : 'NO (Disabled by default)'}</div>
+          <div>✓ Hard Flag 'LIVE_TRADING_ENABLED': ${preflight.hard_flag_enabled ? 'TRUE' : 'FALSE (Safe by default)'}</div>
+          <div>✓ Process Session Authorized: ${preflight.process_authorized ? 'YES (Ephemeral)' : 'NO (Expires on reboot)'}</div>
           <div>✓ Credentials configured: ${preflight.checklist.credentials_present ? 'YES' : 'NO'}</div>
           <div>✓ Double confirmation: ${preflight.checklist.double_confirmation_accepted ? 'YES' : 'NO'}</div>
           <div>✓ Kill Switch inactive: ${preflight.checklist.kill_switch_inactive ? 'YES' : 'NO'}</div>
@@ -587,12 +755,225 @@ document.addEventListener('DOMContentLoaded', () => {
         logTerminal.textContent = logData.logs.join('');
         logTerminal.scrollTop = logTerminal.scrollHeight;
       }
+
+      // Forensic Audit Trail
+      const auditData = await API.getAuditTrail(50);
+      const auditBody = document.getElementById('audit-trail-body');
+      if (auditBody && auditData.audit_logs) {
+        auditBody.innerHTML = '';
+        if (auditData.audit_logs.length === 0) {
+          auditBody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #57606a;">No audit records found</td></tr>';
+        } else {
+          auditData.audit_logs.forEach(a => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td style="color: var(--text-secondary);">${a.timestamp ? a.timestamp.replace('T', ' ').substring(0, 19) : '-'}</td>
+              <td><span class="badge ${a.actor === 'USER' ? 'positive' : 'negative'}">${a.actor}</span></td>
+              <td style="font-weight: 600; color: #fff;">${a.action}</td>
+              <td style="color: var(--color-blue);">${a.component}</td>
+              <td style="font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                ${JSON.stringify(a.details)}
+              </td>
+            `;
+            auditBody.appendChild(tr);
+          });
+        }
+      }
     } catch (e) {}
   }
 
   const btnRefreshLogs = document.getElementById('btn-refresh-logs');
   if (btnRefreshLogs) {
     btnRefreshLogs.addEventListener('click', loadSettingsAndLogs);
+  }
+
+  const btnRefreshAudit = document.getElementById('btn-refresh-audit');
+  if (btnRefreshAudit) {
+    btnRefreshAudit.addEventListener('click', loadSettingsAndLogs);
+  }
+
+  // --- Trade Diagnostics ("Why Did the Bot Trade?") ---
+  window.inspectTrade = (idx) => {
+    const trade = window._currentBacktestTrades[idx];
+    if (!trade) return;
+
+    const modal = document.getElementById('modal-trade-why');
+    const content = document.getElementById('modal-why-content');
+    if (!modal || !content) return;
+
+    let snap = {};
+    if (trade.indicator_snapshot) {
+      if (typeof trade.indicator_snapshot === 'string') {
+        try { snap = JSON.parse(trade.indicator_snapshot); } catch (e) { snap = {}; }
+      } else {
+        snap = trade.indicator_snapshot;
+      }
+    }
+
+    const pnlCls = trade.net_pnl >= 0 ? 'positive' : 'negative';
+    const grossPnl = ((trade.exit_price || 0) - trade.entry_price) * trade.quantity * (trade.side === 'LONG' ? 1 : -1);
+
+    content.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px;">
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Symbol & Side</div>
+          <div style="font-weight: bold; color: #fff; font-size: 14px;">${trade.symbol} <span class="badge ${trade.side === 'LONG' ? 'positive' : 'negative'}">${trade.side}</span></div>
+        </div>
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Entry / Exit Price</div>
+          <div style="font-weight: bold; color: #fff; font-size: 14px;">₹${trade.entry_price.toFixed(2)} → ₹${trade.exit_price ? trade.exit_price.toFixed(2) : '-'}</div>
+        </div>
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Gross vs Net P&L</div>
+          <div style="font-weight: bold; font-size: 14px;" class="${pnlCls}">₹${grossPnl.toFixed(2)} → ₹${trade.net_pnl.toFixed(2)}</div>
+        </div>
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Total Friction (Taxes/Fees)</div>
+          <div style="font-weight: bold; color: var(--color-amber); font-size: 14px;">₹${trade.total_fees.toFixed(2)}</div>
+        </div>
+      </div>
+
+      <div style="background: #0d1219; border: 1px solid var(--border-color); border-radius: 4px; padding: 14px; margin-bottom: 16px;">
+        <div style="font-weight: bold; color: var(--color-blue); margin-bottom: 6px; font-size: 13px;">🎯 Execution Reason & Logic Trigger</div>
+        <div style="color: #e6edf3; font-size: 13px; line-height: 1.5;">${trade.strategy_reason || 'Signal generated from indicator threshold event.'}</div>
+        <div style="font-size: 11px; color: var(--text-secondary); margin-top: 6px;">
+          Timestamps: Entry <b>${trade.entry_time.replace('T', ' ')}</b> | Exit <b>${trade.exit_time ? trade.exit_time.replace('T', ' ') : 'Open'}</b>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+        <div class="card">
+          <div class="card-title">📈 Quantitative Indicator Snapshot at Signal</div>
+          <div style="margin-top: 8px;">
+            ${Object.keys(snap).length === 0 ? '<div style="color: var(--text-muted); font-size: 11px;">No indicator metadata captured for this legacy trade.</div>' : `
+              <table class="terminal-table">
+                <thead><tr><th>Metric</th><th>Value</th></tr></thead>
+                <tbody>
+                  ${Object.entries(snap).map(([k, v]) => `
+                    <tr>
+                      <td style="color: var(--text-secondary); font-family: var(--font-mono);">${k}</td>
+                      <td style="font-weight: bold; color: #fff; font-family: var(--font-mono);">${typeof v === 'number' ? v.toFixed(3) : v}</td>
+                    </tr>
+                  `).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">🇮🇳 Indian Statutory Cost & Friction Breakdown</div>
+          <div style="margin-top: 8px;">
+            <table class="terminal-table">
+              <thead><tr><th>Statutory Component</th><th>Amount</th></tr></thead>
+              <tbody>
+                <tr><td>Brokerage (₹20/order max)</td><td style="font-weight: bold;">₹${((trade.brokerage || 40.0)).toFixed(2)}</td></tr>
+                <tr><td>STT (Securities Transaction Tax)</td><td style="font-weight: bold;">₹${((trade.stt || 0)).toFixed(2)}</td></tr>
+                <tr><td>Exchange Turnover Charges (NSE)</td><td style="font-weight: bold;">₹${((trade.exchange_charges || 0)).toFixed(2)}</td></tr>
+                <tr><td>GST (18% on Brokerage & Exchange)</td><td style="font-weight: bold;">₹${((trade.gst || 0)).toFixed(2)}</td></tr>
+                <tr><td>SEBI Regulatory Turnover Fee</td><td style="font-weight: bold;">₹${((trade.sebi_charges || 0)).toFixed(2)}</td></tr>
+                <tr><td>Stamp Duty (State Level)</td><td style="font-weight: bold;">₹${((trade.stamp_duty || 0)).toFixed(2)}</td></tr>
+                <tr><td>Simulated Slippage</td><td style="font-weight: bold;">₹${((trade.slippage || 0)).toFixed(2)}</td></tr>
+                <tr style="border-top: 1px solid var(--border-highlight); font-weight: bold; color: var(--color-amber);">
+                  <td>Total Statutory Drag</td><td>₹${trade.total_fees.toFixed(2)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+  };
+
+  // --- Walk-Forward Results Modal ---
+  function renderWalkForwardModal(res) {
+    const modal = document.getElementById('modal-walk-forward');
+    const content = document.getElementById('modal-wf-content');
+    if (!modal || !content) return;
+
+    const summary = res.summary || {};
+    const windows = res.windows || [];
+
+    content.innerHTML = `
+      <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px;">
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Overall Robustness</div>
+          <div style="font-size: 16px; font-weight: bold; color: ${summary.is_robust ? 'var(--color-green)' : 'var(--color-amber)'};">
+            ${summary.is_robust ? '✓ ROBUST' : '⚠️ OVERFIT RISK'}
+          </div>
+        </div>
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Walk-Forward Efficiency (WFE)</div>
+          <div style="font-size: 16px; font-weight: bold; color: #fff;">${summary.walk_forward_efficiency_pct}%</div>
+        </div>
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Average In-Sample Return</div>
+          <div style="font-size: 16px; font-weight: bold; color: var(--color-blue);">${summary.avg_in_sample_return_pct}%</div>
+        </div>
+        <div style="background: #10141a; padding: 10px; border-radius: 4px; border: 1px solid var(--border-color);">
+          <div style="color: var(--text-muted); font-size: 11px;">Average Out-of-Sample Return</div>
+          <div style="font-size: 16px; font-weight: bold; color: ${summary.avg_out_of_sample_return_pct >= 0 ? 'var(--color-green)' : 'var(--color-red)'};">
+            ${summary.avg_out_of_sample_return_pct}%
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Rolling Validation Slices (Train vs Test)</div>
+        <div class="table-container" style="margin-top: 8px;">
+          <table class="terminal-table">
+            <thead>
+              <tr>
+                <th>Slice</th>
+                <th>In-Sample (Train) Period</th>
+                <th>IS Net Return</th>
+                <th>IS Trades</th>
+                <th>Out-of-Sample (Test) Period</th>
+                <th>OOS Net Return</th>
+                <th>OOS Trades</th>
+                <th>Efficiency (OOS/IS)</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${windows.map(w => {
+                const effCls = w.efficiency_ratio >= 0.5 ? 'positive' : w.efficiency_ratio > 0 ? 'color: var(--color-amber);' : 'negative';
+                return `
+                  <tr>
+                    <td><b>Slice #${w.window_index}</b></td>
+                    <td>${w.is_start} → ${w.is_end}</td>
+                    <td class="${w.is_return_pct >= 0 ? 'positive' : 'negative'}">${w.is_return_pct >= 0 ? '+' : ''}${w.is_return_pct}%</td>
+                    <td>${w.is_trades}</td>
+                    <td>${w.oos_start} → ${w.oos_end}</td>
+                    <td class="${w.oos_return_pct >= 0 ? 'positive' : 'negative'}">${w.oos_return_pct >= 0 ? '+' : ''}${w.oos_return_pct}%</td>
+                    <td>${w.oos_trades}</td>
+                    <td class="${effCls}">${(w.efficiency_ratio * 100).toFixed(1)}%</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+  }
+
+  // Close Modals
+  const btnCloseWhy = document.getElementById('btn-close-why-modal');
+  if (btnCloseWhy) {
+    btnCloseWhy.onclick = () => {
+      document.getElementById('modal-trade-why').style.display = 'none';
+    };
+  }
+
+  const btnCloseWf = document.getElementById('btn-close-wf-modal');
+  if (btnCloseWf) {
+    btnCloseWf.onclick = () => {
+      document.getElementById('modal-walk-forward').style.display = 'none';
+    };
   }
 
   // --- Strategies Tab ---

@@ -16,6 +16,7 @@ from app.core.exceptions import (
     DuplicateOrderError
 )
 from app.core.event_bus import event_bus, EventType
+from app.core.audit import record_audit_log
 
 logger = logging.getLogger("trading_bot.risk.manager")
 
@@ -45,18 +46,21 @@ class RiskManager:
         if current_state.is_emergency_stopped or current_state.status == BotStatus.EMERGENCY_STOPPED:
             msg = "Execution BLOCKED: EMERGENCY STOP is active. Manual reset required."
             logger.critical(msg)
+            record_audit_log("RISK_ENGINE", "ORDER_BLOCKED_EMERGENCY_STOP", "risk_manager", {"symbol": symbol, "side": side, "quantity": quantity})
             return False, msg
 
         # 2. Persistent Kill Switch Check
         if current_state.is_kill_switch_active:
             msg = "Execution BLOCKED: KILL SWITCH is ON in database/settings."
             logger.critical(msg)
+            record_audit_log("RISK_ENGINE", "ORDER_BLOCKED_KILL_SWITCH", "risk_manager", {"symbol": symbol, "side": side, "quantity": quantity})
             return False, msg
 
         # 3. Bot Operational Status Check
         if current_state.status == BotStatus.HALTED:
             msg = f"Execution BLOCKED: Bot is HALTED ({current_state.halt_reason})."
             logger.warning(msg)
+            record_audit_log("RISK_ENGINE", "ORDER_BLOCKED_BOT_HALTED", "risk_manager", {"symbol": symbol, "side": side, "reason": current_state.halt_reason})
             return False, msg
 
         # 4. Maximum Daily Loss Limit
@@ -65,6 +69,7 @@ class RiskManager:
             logger.critical(msg)
             state_manager.trigger_risk_halt(msg)
             event_bus.emit(EventType.RISK_ALERT, {"reason": msg, "type": "MAX_DAILY_LOSS"})
+            record_audit_log("RISK_ENGINE", "HALT_MAX_DAILY_LOSS", "risk_manager", {"today_pnl": current_state.today_pnl, "limit": self.limits.max_daily_loss})
             return False, msg
 
         # 5. Maximum Drawdown Limit
@@ -73,6 +78,7 @@ class RiskManager:
             logger.critical(msg)
             state_manager.trigger_risk_halt(msg)
             event_bus.emit(EventType.RISK_ALERT, {"reason": msg, "type": "MAX_DRAWDOWN"})
+            record_audit_log("RISK_ENGINE", "HALT_MAX_DRAWDOWN", "risk_manager", {"drawdown_pct": current_state.drawdown_pct, "limit": self.limits.max_drawdown_pct})
             return False, msg
 
         # 6. Maximum Daily Trades Count (Only limits new position opening)
@@ -81,6 +87,7 @@ class RiskManager:
             logger.warning(msg)
             state_manager.trigger_risk_halt(msg)
             event_bus.emit(EventType.RISK_ALERT, {"reason": msg, "type": "MAX_TRADES"})
+            record_audit_log("RISK_ENGINE", "HALT_MAX_TRADES", "risk_manager", {"trades_count": current_state.today_trades_count, "limit": self.limits.max_trades_per_day})
             return False, msg
 
         # 7. Maximum Position Value Limit
@@ -88,12 +95,14 @@ class RiskManager:
         if position_value > self.limits.max_position_size_value:
             msg = f"Order REJECTED: Order value ₹{position_value:.2f} exceeds max position size ₹{self.limits.max_position_size_value:.2f}"
             logger.warning(msg)
+            record_audit_log("RISK_ENGINE", "ORDER_REJECTED_POSITION_SIZE", "risk_manager", {"symbol": symbol, "value": position_value, "limit": self.limits.max_position_size_value})
             return False, msg
 
         # 8. Maximum Open Positions Count
         if side.upper() == "BUY" and current_state.open_positions_count >= self.limits.max_open_positions:
             msg = f"Order REJECTED: Max open positions limit ({self.limits.max_open_positions}) reached."
             logger.warning(msg)
+            record_audit_log("RISK_ENGINE", "ORDER_REJECTED_MAX_POSITIONS", "risk_manager", {"symbol": symbol, "open_positions": current_state.open_positions_count, "limit": self.limits.max_open_positions})
             return False, msg
 
         # 9. Duplicate Order Protection (cooldown window)
@@ -108,6 +117,7 @@ class RiskManager:
             ):
                 msg = f"Order SUPPRESSED: Duplicate order detected within {cooldown}s cooldown window."
                 logger.warning(msg)
+                record_audit_log("RISK_ENGINE", "ORDER_SUPPRESSED_DUPLICATE", "risk_manager", {"symbol": symbol, "side": side, "quantity": quantity, "cooldown": cooldown})
                 return False, msg
 
         # Record this order intent in recent orders queue

@@ -89,10 +89,11 @@ class PaperBroker(BaseBroker):
         price: Optional[float] = None,
         stop_loss: Optional[float] = None,
         target: Optional[float] = None,
-        reason: str = ""
+        reason: str = "",
+        indicator_snapshot: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
-        Simulate order fill at current price with realistic slippage and statutory costs.
+        Simulate order fill at current price with realistic slippage, simulated latency, and statutory costs.
         """
         now = datetime.now(timezone.utc)
         order_id = str(uuid.uuid4())
@@ -107,9 +108,12 @@ class PaperBroker(BaseBroker):
         else:
             fill_price = round(price * (1.0 - slippage_factor), 2)
 
-        # Statutory Indian transaction costs
-        costs = self.cost_calculator.calculate(side, fill_price, quantity)
+        # Statutory Indian transaction costs with date-awareness
+        costs = self.cost_calculator.calculate(side, fill_price, quantity, timestamp=now)
         trade_value = fill_price * quantity
+
+        # Simulated gateway latency (e.g. 35-65ms on fast broadband)
+        simulated_latency_ms = 48.5
 
         order_record = {
             "order_id": order_id,
@@ -120,10 +124,12 @@ class PaperBroker(BaseBroker):
             "order_type": order_type,
             "price": fill_price,
             "status": "FILLED",
+            "latency_ms": simulated_latency_ms,
             "stop_loss": stop_loss,
             "target": target,
             "costs": costs.model_dump(),
             "reason": reason,
+            "indicator_snapshot": indicator_snapshot or {},
             "timestamp": now.isoformat()
         }
         self.orders.append(order_record)
@@ -155,7 +161,9 @@ class PaperBroker(BaseBroker):
                     "net_pnl": round(net_pnl, 2),
                     "total_fees": round(costs.total_costs + pos.get("entry_costs", 0), 2),
                     "slippage_cost": round(costs.slippage, 2),
-                    "strategy_reason": reason
+                    "strategy_reason": reason,
+                    "indicator_snapshot": indicator_snapshot or pos.get("indicator_snapshot", {}),
+                    "cost_regime": costs.cost_regime
                 }
                 self.trades.append(trade_record)
                 del self.positions[symbol]
@@ -208,7 +216,9 @@ class PaperBroker(BaseBroker):
                     "net_pnl": round(net_pnl, 2),
                     "total_fees": round(costs.total_costs + pos.get("entry_costs", 0), 2),
                     "slippage_cost": round(costs.slippage, 2),
-                    "strategy_reason": reason
+                    "strategy_reason": reason,
+                    "indicator_snapshot": indicator_snapshot or pos.get("indicator_snapshot", {}),
+                    "cost_regime": costs.cost_regime
                 }
                 self.trades.append(trade_record)
                 del self.positions[symbol]

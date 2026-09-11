@@ -60,6 +60,10 @@ class Settings(BaseSettings):
     DEFAULT_STAMP_DUTY_RATE: float = 0.00003  # 0.003% on buy
     DEFAULT_SLIPPAGE_PCT: float = 0.0005  # 0.05% slippage
 
+    # Hard Live Trading Kill Flags
+    # Independent hard flag: even if APP_MODE='live', this must be explicitly True
+    LIVE_TRADING_ENABLED: bool = False
+
     # Optional Telegram Notifications
     TELEGRAM_BOT_TOKEN: Optional[str] = None
     TELEGRAM_CHAT_ID: Optional[str] = None
@@ -73,8 +77,6 @@ class Settings(BaseSettings):
     BROKER_PASSWORD: Optional[str] = None
     BROKER_TOTP_KEY: Optional[str] = None
 
-    # Safety confirmation flag for Live Mode
-    LIVE_CONFIRMATION_ACCEPTED: bool = False
 
     def sanitized_dict(self) -> dict:
         """
@@ -97,6 +99,38 @@ class Settings(BaseSettings):
             else:
                 data[key] = None
         return data
+
+
+class ProcessSecurityContext:
+    """
+    Ephemeral in-memory authorization store for live trading.
+    STRICT SAFETY RULE: Never saved to disk or DB.
+    Whenever the process reboots, live authorization is instantly revoked.
+    """
+    def __init__(self):
+        self.session_authorized: bool = False
+        self.authorized_at_utc: Optional[str] = None
+        self.authorized_by: Optional[str] = None
+
+    def authorize_session(self, user_confirmation: str) -> bool:
+        from datetime import datetime, timezone
+        if user_confirmation == "I CONFIRM LIVE TRADING AT MY OWN RISK":
+            self.session_authorized = True
+            self.authorized_at_utc = datetime.now(timezone.utc).isoformat()
+            self.authorized_by = "LOCAL_USER_MANUAL_OVERRIDE"
+            return True
+        return False
+
+    def revoke_session(self) -> None:
+        self.session_authorized = False
+        self.authorized_at_utc = None
+        self.authorized_by = None
+
+    def is_authorized(self) -> bool:
+        return self.session_authorized
+
+
+process_security_context = ProcessSecurityContext()
 
 
 @lru_cache()
