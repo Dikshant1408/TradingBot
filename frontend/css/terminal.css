@@ -63,14 +63,17 @@ body {
   gap: 12px;
 }
 
-.brand-title {
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.5px;
-  color: #fff;
+.brand-logo-wrap {
   display: flex;
   align-items: center;
-  gap: 8px;
+}
+
+.brand-logo-img {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+  display: block;
+  border-radius: 4px;
 }
 
 .brand-badge {

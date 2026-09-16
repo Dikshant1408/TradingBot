@@ -1,0 +1,28 @@
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "app/main.py",
+      "use": "@vercel/python"
+    },
+    {
+      "src": "frontend/**",
+      "use": "@vercel/static"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/static/(.*)",
+      "dest": "/frontend/$1"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/app/main.py"
+    }
+  ],
+  "env": {
+    "APP_MODE": "paper",
+    "APP_NAME": "QuantDesk India",
+    "APP_VERSION": "1.0.0"
+  }
+}
